@@ -1,7 +1,64 @@
-import test from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const BASE_URL = "http://localhost:3000";
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const BASE_URL = process.env.GORIEE_TEST_BASE_URL ?? "http://127.0.0.1:3000";
+const READY_TIMEOUT_MS = Number(process.env.GORIEE_TEST_READY_TIMEOUT_MS ?? 120_000);
+// Live LLM/web-research tests call a real paid provider and are slow/flaky.
+// Opt in explicitly with GORIEE_RUN_LIVE_AI_TESTS=1.
+const RUN_LIVE_AI_TESTS = process.env.GORIEE_RUN_LIVE_AI_TESTS === "1";
+
+let devServer = null;
+
+async function serverAlive() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/ai-status`, { signal: AbortSignal.timeout(2_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function killDevServer() {
+  if (!devServer) return;
+  const pid = devServer.pid;
+  devServer = null;
+  if (process.platform === "win32") {
+    if (pid) spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+  } else if (pid) {
+    try { process.kill(-pid, "SIGTERM"); } catch { /* already exited */ }
+  }
+}
+
+before(async () => {
+  if (await serverAlive()) return; // reuse an already-running dev server
+  const port = new URL(BASE_URL).port || "3000";
+  devServer = spawn(
+    process.execPath,
+    [path.join(PROJECT_ROOT, "node_modules", "next", "dist", "bin", "next"), "dev", "--port", port],
+    {
+      cwd: PROJECT_ROOT,
+      stdio: "ignore",
+      detached: process.platform !== "win32",
+      env: { ...process.env, PORT: port },
+    },
+  );
+  devServer.on("exit", () => { devServer = null; });
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await serverAlive()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  killDevServer();
+  throw new Error(`Dev server did not become ready at ${BASE_URL} within ${READY_TIMEOUT_MS / 1000}s. Start it manually with "npm run dev" and re-run, or set GORIEE_TEST_BASE_URL.`);
+});
+
+after(() => {
+  killDevServer();
+});
 
 test("API: Root HTML and Application Shell (GET /)", async () => {
   const res = await fetch(`${BASE_URL}/`);
@@ -192,7 +249,7 @@ test("API: Research Error Handling (POST /api/research - Invalid Inputs)", async
   assert.ok(data.error.includes("Choose a supported spot symbol"), "Error message should guide user");
 });
 
-test("API: Live Web Research Synthesis across AI Routers (POST /api/research)", { timeout: 160_000 }, async () => {
+test("API: Live Web Research Synthesis across AI Routers (POST /api/research)", { timeout: 160_000, skip: !RUN_LIVE_AI_TESTS && "live AI test skipped (set GORIEE_RUN_LIVE_AI_TESTS=1 to run)" }, async () => {
   let res = await fetch(`${BASE_URL}/api/research`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -231,4 +288,3 @@ test("API: Live Web Research Synthesis across AI Routers (POST /api/research)", 
   assert.ok(data.report.sources.length > 0, "Should include live news citations");
   assert.ok(data.report.sources[0].url.startsWith("http"), "Source URL must be valid HTTP/HTTPS");
 });
-

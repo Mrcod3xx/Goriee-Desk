@@ -1,5 +1,6 @@
 type Validator = (value: unknown) => boolean;
 const text: Validator = (v) => typeof v === "string" && v.length <= 20_000;
+const longText: Validator = (v) => typeof v === "string" && v.length <= 200_000;
 const num: Validator = (v) => typeof v === "number" && Number.isFinite(v);
 const positive: Validator = (v) => num(v) && (v as number) > 0;
 const nonnegative: Validator = (v) => num(v) && (v as number) >= 0;
@@ -9,6 +10,7 @@ const optional = (check: Validator): Validator => (v) => v === undefined || chec
 const nullable = (check: Validator): Validator => (v) => v === null || check(v);
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const object = (fields: Record<string, Validator>): Validator => (v) => record(v) && Object.keys(v).every((key) => Object.hasOwn(fields, key)) && Object.entries(fields).every(([key, check]) => check(v[key]));
+const looseObject = (fields: Record<string, Validator>): Validator => (v) => record(v) && Object.entries(fields).every(([key, check]) => check(v[key]));
 const array = (check: Validator, max = 10000): Validator => (v) => Array.isArray(v) && v.length <= max && v.every(check);
 const interval = oneOf("15m", "1H", "4H", "1D");
 const fee: Validator = (v) => nonnegative(v) && (v as number) <= 1000;
@@ -24,6 +26,10 @@ const journal = object({
 });
 const playbook = object({ id: text, name: text, symbol, interval, prompt: text, lookbackDays: oneOf(7, 30, 90, 180, 365), feeBps: fee, slippageBps: fee, createdAt: positive, researchRef: optional(researchRef), backtestRef: optional(backtestRef) });
 const bracket = object({ symbol, takeProfitPrice: optional(positive), takeProfitPct: optional(positive), stopLossPrice: optional(positive), stopLossPct: optional(positive), trailingStopPct: optional(positive), peakPrice: optional(positive), createdAt: positive });
+const ruleRunnerLog = looseObject({ id: text, time: positive, symbol, action: oneOf("buy", "sell", "hold"), message: text });
+const copilotAction = (v: unknown) => record(v) && typeof v.type === "string" && oneOf("order", "backtest", "playbook", "market")(v.type);
+const copilotMessage = looseObject({ id: text, role: oneOf("user", "assistant", "system"), content: longText, timestamp: positive, actions: optional(array(copilotAction, 100)) });
+const copilotSession = looseObject({ id: text, title: text, createdAt: positive, updatedAt: positive, symbol, messages: array(copilotMessage, 5_000) });
 
 const schemas: Record<string, Validator> = {
   "goriee.journal.v1": array(journal, 30),
@@ -36,6 +42,9 @@ const schemas: Record<string, Validator> = {
   "goriee.active-paper-playbook.v1": text,
   "goriee.paper-brackets.v1": (v) => record(v) && Object.entries(v).every(([key, value]) => symbol(key) && bracket(value) && (value as Record<string, unknown>).symbol === key),
   "goriee.drafts.v1": object({ question: optional(text), strategy: optional(text) }),
+  "goriee.auto-rule-runner.v1": (v) => typeof v === "boolean",
+  "goriee.rule-runner-logs.v1": array(ruleRunnerLog, 50),
+  "goriee_copilot_sessions_v1": array(copilotSession, 100),
 };
 
 export type WorkspaceSnapshot = { format: "goriee-workspace"; version: 1; exportedAt: string; data: Record<string, unknown> };
@@ -47,7 +56,7 @@ export function parseWorkspaceBackup(raw: string): WorkspaceSnapshot {
   if (!record(snapshot) || snapshot.format !== "goriee-workspace" || snapshot.version !== 1 || typeof snapshot.exportedAt !== "string" || !Number.isFinite(Date.parse(snapshot.exportedAt)) || !record(snapshot.data)) throw new Error("Choose a Goriee workspace backup, version 1.");
   const data = snapshot.data;
   if (!Object.keys(data).length || !Object.entries(data).every(([key, value]) => Object.hasOwn(schemas, key) && schemas[key](value))) throw new Error("Backup contains unsupported or invalid data. Nothing was changed.");
-  for (const key of ["goriee.paper.v1", "goriee.journal.v1", "goriee.playbooks.v1", "goriee.paper-alerts.v1"]) {
+  for (const key of ["goriee.paper.v1", "goriee.journal.v1", "goriee.playbooks.v1", "goriee.paper-alerts.v1", "goriee.rule-runner-logs.v1", "goriee_copilot_sessions_v1"]) {
     const items = (data[key] ?? []) as Array<{ id: string }>;
     if (new Set(items.map((item) => item.id)).size !== items.length) throw new Error("Backup contains duplicate record IDs.");
   }

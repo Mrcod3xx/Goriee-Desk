@@ -16,7 +16,7 @@ export function WorkspaceBackup() {
   const [message, setMessage] = useState("");
   return <section className="panel workspace-backup" aria-labelledby="backup-heading">
     <h2 id="backup-heading">Back up your workspace</h2>
-    <p>Export your journal, watchlist, paper fills, review notes, brackets, alerts, playbooks, risk settings and draft prompts. Provider credentials are excluded. Data belongs to this browser and address; localhost and 127.0.0.1 have separate histories.</p>
+    <p>Export your journal, watchlist, paper fills, review notes, brackets, alerts, playbooks, risk settings, draft prompts, auto rule-runner configuration, execution audit logs and AI copilot sessions. Provider credentials are excluded. Data belongs to this browser and address; localhost and 127.0.0.1 have separate histories.</p>
     <div className="backup-actions"><button className="button button-secondary" onClick={() => { try { download(captureWorkspace(localStorage)); setMessage("Backup downloaded."); } catch { setMessage("Could not read browser storage for export."); } }}>Download backup</button>
     <label>Choose backup to restore<input type="file" accept=".json,application/json" onChange={async (event) => {
       const file = event.target.files?.[0];
@@ -29,7 +29,7 @@ export function WorkspaceBackup() {
     }} /></label></div>
     {pending ? <div className="backup-preview"><h3>Restore preview</h3><p>Saved {new Date(pending.exportedAt).toLocaleString()}. {Object.entries(pending.data).filter(([, value]) => Array.isArray(value)).map(([key, value]) => `${key.replace("goriee.", "").replace(".v1", "")}: ${(value as unknown[]).length}`).join(" · ")}</p><p>Restore replaces the saved workspace at this address. A copy of your current workspace will download first. The page then reloads.</p><button className="button button-primary" onClick={() => {
       try { download(captureWorkspace(localStorage), "goriee-before-restore"); restoreWorkspace(localStorage, pending); window.location.reload(); }
-      catch { setMessage("Restore failed. Your previous storage was restored. Check available browser storage and try again."); }
+      catch { setMessage("Restore failed. A rollback to your previous storage was attempted but may be incomplete. Verify your data before continuing, check available browser storage, and try again."); }
     }}>Replace workspace with this backup</button><button className="button button-secondary" onClick={() => setPending(null)}>Cancel restore</button></div> : null}
     {message ? <p role="status">{message}</p> : null}
   </section>;

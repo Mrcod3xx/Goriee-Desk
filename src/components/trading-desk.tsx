@@ -2789,7 +2789,7 @@ export default function TradingDesk() {
     setToastMessage("Backtest simulation stopped.");
   }
 
-  async function runBacktest(playbook?: StrategyPlaybook, overrides?: { symbol?: string; interval?: string; prompt?: string; lookbackDays?: number }) {
+  async function runBacktest(playbook?: StrategyPlaybook, overrides?: { symbol?: string; interval?: string; prompt?: string; lookbackDays?: number; researchRef?: { id: string; question: string } }) {
     if (requestBusy.current || Date.now() < aiRetryAt) return;
     requestBusy.current = true;
     setBacktestLoading(true);
@@ -2819,7 +2819,15 @@ export default function TradingDesk() {
         if (typeof payload.retryAt === "number") setAiRetryAt(payload.retryAt);
         throw new Error(payload.error ?? "Backtest could not be completed.");
       }
-      setBacktest({ ...payload.result, ...(seededResearchReport?.symbol === (overrides?.symbol ?? playbook?.symbol ?? symbol) ? { researchRef: { id: seededResearchReport.id, question: seededResearchReport.question } } : playbook?.researchRef ? { researchRef: playbook.researchRef } : {}) } as BacktestResult);
+      const requestSymbol = overrides?.symbol ?? playbook?.symbol ?? symbol;
+      const requestInterval = overrides?.interval ?? playbook?.interval ?? interval;
+      const seededMatchesRequest = seededResearchReport
+        && seededResearchReport.symbol === requestSymbol
+        && seededResearchReport.interval === requestInterval;
+      const researchRef = overrides?.researchRef
+        ?? (seededMatchesRequest ? { id: seededResearchReport.id, question: seededResearchReport.question } : undefined)
+        ?? playbook?.researchRef;
+      setBacktest({ ...payload.result, ...(researchRef ? { researchRef } : {}) } as BacktestResult);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         return;
@@ -2848,6 +2856,7 @@ export default function TradingDesk() {
       interval: intervalToUse,
       prompt: promptToUse,
       lookbackDays: supportsBacktestWindow(intervalToUse, backtestDays) ? backtestDays : intervalToUse === "1D" ? 90 : 30,
+      researchRef: { id: targetReport.id, question: targetReport.question },
     });
   }
 

@@ -2,8 +2,8 @@
 
 > **Additional handoff (September 25):** Read [CODEX_HANDOFF_2026-09-25.md](CODEX_HANDOFF_2026-09-25.md) for the interrupted Codex reliability/backup/workflow batch, remaining issues and its limited verification. The historical test status below does not establish that this newer batch or concurrent edits are verified.
 
-**Last Updated:** September 26, 2026  
-**Status:** 100% Green Test Suite (32 unit/quant tests passing, 12 general/copilot E2E passing, 9 trade replay E2E passing, 0 TypeScript errors, 0 console errors across all 9 tabs).  
+**Last Updated:** September 26, 2026 (reliability pass)  
+**Status:** `npm test` green: 36 tests, 35 pass, 0 fail, 1 skipped (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`).  
 **Stack:** Next.js 15 (App Router, Turbopack), React 19, TypeScript, Vanilla CSS design system, Bitget Public Spot API.
 
 ---
@@ -19,6 +19,10 @@ npm run typecheck
 
 # 3. Run full automated unit test suite (32 unit, Monte Carlo, and API tests)
 npm test
+# Note: test/api.test.mjs auto-starts `next dev` on 127.0.0.1:3000 if no server is
+# already listening (needs network for the Bitget public API). Override the target
+# with GORIEE_TEST_BASE_URL. The live LLM research test is skipped unless
+# GORIEE_RUN_LIVE_AI_TESTS=1 is set (it calls a real paid provider).
 
 # 4. Run general E2E and Strategy Copilot tests
 npm run test:e2e
@@ -128,9 +132,14 @@ All user-generated state is stored locally in the browser under versioned keys:
 | `goriee.paper.v1` | `PaperTrade[]` | Paper trades ledger (fills, closes, fees). |
 | `goriee.paper-brackets.v1` | `PaperBracket[]` | TP/SL/Trailing stop bracket orders. |
 | `goriee.paper-alerts.v1` | `PaperAlert[]` (max 50) | Price, stop, and target alerts. |
-| `goriee.paper-risk.v1` | `{ dailyLossLimit: number }` | Daily loss guard configuration. |
+| `goriee.paper-risk.v1` | `number` (1-100000, USD) | Daily loss guard limit, stored as a plain number (default 250). |
 | `goriee.watchlist.v1` | `string[]` (max 50) | User's tracked market symbols. |
 | `goriee.journal.v1` | `SavedResearchBrief[]` | Historical saved research reports. |
+| `goriee.auto-rule-runner.v1` | `boolean` | Automated paper rule runner enabled flag. |
+| `goriee.rule-runner-logs.v1` | `Array<{ id, time, symbol, action, message }>` | Automated execution audit log (last ~15 entries loaded). |
+| `goriee_copilot_sessions_v1` | `CopilotSession[]` | AI Strategy Copilot chat threads (note: underscore key format, managed in `strategy-copilot.tsx`). |
+
+All 13 keys above are covered by the workspace backup allowlist in `src/lib/workspace-backup.ts` (round-trip, validation, and restore behavior tested by `test/workspace-backup.test.mjs`).
 
 ---
 
@@ -428,6 +437,17 @@ All user-generated state is stored locally in the browser under versioned keys:
   - 9/9 Trade Replay E2E tests passing (`node --test test/trade-replay-e2e.test.mjs`).
   - 0 TypeScript errors (`npx tsc --noEmit`).
 
+---
 
+## 🔧 19. Reliability Pass (September 26, 2026)
 
+- **Version control initialized:** The project had a `.gitignore` but no repository. `git init` on branch `main` with baseline commit `8b7d7b3` (288 files). Commit after every change batch from now on.
+- **`npm test` made honest and self-contained:**
+  - `test/api.test.mjs` previously failed with `ECONNREFUSED` (11 tests) unless a dev server was already running on port 3000 — the "100% green" claims in older sections assumed a manually started server. It now probes `GORIEE_TEST_BASE_URL` (default `http://127.0.0.1:3000`), auto-spawns `next dev` when nothing is listening, waits up to 120s for readiness, and kills the spawned server afterward (Windows: `taskkill /T /F` on the process tree).
+  - The live LLM "Web Research Synthesis" test calls a real paid provider (took 121s and failed on provider latency during this pass). It is now skipped by default; opt in with `GORIEE_RUN_LIVE_AI_TESTS=1`.
+  - Current verified state: **36 tests, 35 pass, 0 fail, 1 skipped**; `tsc --noEmit` clean.
+- **Workspace backup completed (closes handoff item):** `src/lib/workspace-backup.ts` was missing 3 actively used keys — `goriee.auto-rule-runner.v1` (boolean), `goriee.rule-runner-logs.v1` (audit log array), and `goriee_copilot_sessions_v1` (Copilot threads). Added with validators (loose object shape for copilot sessions/messages so future fields do not invalidate backups), duplicate-ID checks extended, and the Settings UI copy updated. New `test/workspace-backup.test.mjs` (4 tests) covers allowlist, round-trip, rejection of invalid/duplicate payloads, and restore semantics. Restore-failure message no longer promises the rollback succeeded.
+- **Research-provenance race fixed (closes handoff item #2):** `handleBacktestFromReport()` used to `setSeededResearchReport(report)` and call `runBacktest()` in the same closure; the result merge read the *stale* state, so a backtest could be tagged with the previous report. `runBacktest` overrides now accept an explicit `researchRef`, which `handleBacktestFromReport` passes directly; the seeded-report fallback additionally requires symbol AND interval to match the request.
+- **Doc corrections:** `goriee.paper-risk.v1` is stored as a plain number (older sections said `{ dailyLossLimit: number }`); the deterministic backtest fallback compiler is still wired in as the 15s race fallback in `src/app/api/backtest/route.ts` (the Sept 25 handoff claimed its call was removed — it was not).
+- **Still open (from `CODEX_HANDOFF_2026-09-25.md`):** recovery/cooldown UX consistency (item #3), restore-integrity edge cases like quota failure mid-restore and automation running during restore (item #4), bracket safeguards for stale quotes and re-opened positions (item #5). Also outstanding from this review: pin `package.json` deps (currently `"latest"`), add ESLint, decompose the 7,700-line `trading-desk.tsx` and 11,600-line `globals.css`, and prune one-off `test/verify-*.mjs` scripts and committed screenshots.
 
