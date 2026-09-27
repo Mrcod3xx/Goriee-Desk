@@ -358,6 +358,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     target: <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></>,
     bolt: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
     chevronDown: <path d="m6 9 6 6 6-6" />,
+    clock: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
   };
   return <svg {...common}>{paths[name] ?? paths.grid}</svg>;
 }
@@ -1052,7 +1053,7 @@ function PriceChart({
               aria-pressed={showTradeMarkers}
               title="Toggle on-chart trade execution badges and trajectory vectors"
             >
-              👁 Markers {(replayTrades?.length ?? 0) > 0 ? `(${replayTrades!.length})` : ""}
+              Markers {(replayTrades?.length ?? 0) > 0 ? `(${replayTrades!.length})` : ""}
             </button>
           ) : null}
         </div>
@@ -1271,7 +1272,7 @@ function PriceChart({
                           textAnchor="middle"
                           className="pin-text"
                         >
-                          {isWin ? `✕ +$${t.pnl.toFixed(2)}` : `✕ -$${Math.abs(t.pnl).toFixed(2)}`}
+                          {isWin ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`}
                         </text>
                       </g>
                     )}
@@ -1444,7 +1445,7 @@ function PriceChart({
                 fontWeight="bold"
                 fontFamily="var(--font-mono, monospace)"
               >
-                ✂ Cut Here
+                Cut Here
               </text>
             </g>
           )}
@@ -1572,13 +1573,13 @@ function PriceChart({
             <span className="macd-title">MACD (12, 26, 9)</span>
             <div className="macd-hover-readout">
               <span className="macd-val-macd">
-                MACD: <strong>{currentMacd?.macd !== null && currentMacd?.macd !== undefined ? currentMacd.macd.toFixed(2) : "—"}</strong>
+                MACD: <strong>{currentMacd?.macd !== null && currentMacd?.macd !== undefined ? currentMacd.macd.toFixed(2) : "n/a"}</strong>
               </span>
               <span className="macd-val-signal">
-                Signal: <strong>{currentMacd?.signal !== null && currentMacd?.signal !== undefined ? currentMacd.signal.toFixed(2) : "—"}</strong>
+                Signal: <strong>{currentMacd?.signal !== null && currentMacd?.signal !== undefined ? currentMacd.signal.toFixed(2) : "n/a"}</strong>
               </span>
               <span className={`macd-val-hist ${(currentMacd?.histogram ?? 0) >= 0 ? "tone-up" : "tone-down"}`}>
-                Hist: <strong>{currentMacd?.histogram !== null && currentMacd?.histogram !== undefined ? (currentMacd.histogram >= 0 ? "+" : "") + currentMacd.histogram.toFixed(2) : "—"}</strong>
+                Hist: <strong>{currentMacd?.histogram !== null && currentMacd?.histogram !== undefined ? (currentMacd.histogram >= 0 ? "+" : "") + currentMacd.histogram.toFixed(2) : "n/a"}</strong>
               </span>
             </div>
           </div>
@@ -3907,7 +3908,7 @@ export default function TradingDesk() {
               onClick={() => setCopilotOpen((prev) => !prev)}
               title="Open AI Strategy Copilot (Ctrl+J)"
             >
-              <span className="header-sparkle">✦</span>
+              <Icon name="cpu" size={13} />
               <span>AI Copilot</span>
               <kbd>Ctrl+J</kbd>
             </button>
@@ -4146,7 +4147,7 @@ export default function TradingDesk() {
                                 disabled={marketLoading || aiConfigured === false || requestBusy.current || cooldownSeconds > 0}
                               >
                                 {cooldownSeconds > 0
-                                  ? `⏳ Cooldown (${cooldownSeconds}s)`
+                                  ? `Cooldown (${cooldownSeconds}s)`
                                   : requestBusy.current
                                   ? "Request in progress…"
                                   : <>Build research brief <Icon name="arrow" size={16} /></>}
@@ -4331,7 +4332,7 @@ export default function TradingDesk() {
                           <Icon name="research" size={15} />
                           <span>
                             {cooldownSeconds > 0
-                              ? `⏳ Cooldown (${cooldownSeconds}s)`
+                              ? `Cooldown (${cooldownSeconds}s)`
                               : requestBusy.current
                               ? "Request in progress…"
                               : `Research ${symbol} (${interval})`}
@@ -4425,7 +4426,7 @@ export default function TradingDesk() {
                       <div className="preflight-metric-box">
                         <div className="preflight-metric-top">
                           <span>Key S/R Envelope</span>
-                          <strong>{liveIndicators ? `${formatPrice(liveIndicators.support)} – ${formatPrice(liveIndicators.resistance)}` : "n/a"}</strong>
+                          <strong>{liveIndicators ? `${formatPrice(liveIndicators.support)} to ${formatPrice(liveIndicators.resistance)}` : "n/a"}</strong>
                         </div>
                         <div className="preflight-sub-stats">
                           <span>Regime: <strong className="regime-tag">{liveIndicators?.regime ?? "Analyzing"}</strong></span>
@@ -4697,7 +4698,7 @@ export default function TradingDesk() {
                     </div>
                     <div className="seed-banner-actions">
                       <button type="button" className="seed-return-btn" onClick={() => setView("research")}>View brief</button>
-                      <button type="button" className="seed-dismiss-btn" onClick={() => setSeededResearchReport(null)} title="Clear research hypothesis link">✕</button>
+                      <button type="button" className="seed-dismiss-btn" onClick={() => setSeededResearchReport(null)} title="Clear research hypothesis link" aria-label="Clear"><Icon name="close" size={11} /></button>
                     </div>
                   </div>
                 ) : null}
@@ -4737,7 +4738,7 @@ export default function TradingDesk() {
                       disabled={aiConfigured === false || strategyPrompt.trim().length < 8 || !supportsBacktestWindow(interval, backtestDays) || requestBusy.current || cooldownSeconds > 0}
                     >
                       {cooldownSeconds > 0
-                        ? `⏳ Cooldown (${cooldownSeconds}s)`
+                        ? `Cooldown (${cooldownSeconds}s)`
                         : requestBusy.current
                         ? "Simulation in progress…"
                         : "Compile rule & run backtest"}
@@ -5012,7 +5013,7 @@ export default function TradingDesk() {
                     </div>
                     {backtest.robustness.isStatisticallyFragile ? (
                       <p className="credibility-warning">
-                        <strong>Sample size notice:</strong> Only {backtest.closedTrades} trades occurred in this window. High variance may distort metrics; test over 90–365 days before drawing trading conclusions.
+                        <strong>Sample size notice:</strong> Only {backtest.closedTrades} trades occurred in this window. High variance may distort metrics; test over 90 to 365 days before drawing trading conclusions.
                       </p>
                     ) : null}
                   </section>
@@ -5425,7 +5426,6 @@ export default function TradingDesk() {
                           title="Toggle cut tool: click any bar on the chart to set starting point"
                           aria-pressed={isCutMode}
                         >
-                          <span className="cut-icon">✂</span>
                           <span>{isCutMode ? "Selecting Bar..." : "Cut Bar Tool"}</span>
                         </button>
                         <span className="chart-source">Bitget Tape Feed</span>
@@ -5520,7 +5520,7 @@ export default function TradingDesk() {
                               title={isReplayPlaying ? "Pause simulation playback (Space)" : "Start simulation playback (Space)"}
                               aria-pressed={isReplayPlaying}
                             >
-                              <span className="playback-glyph">{isReplayPlaying ? "⏸" : "▶"}</span>
+                              <span className="playback-glyph">{isReplayPlaying ? "Pause" : "Play"}</span>
                               <span className="playback-label">{isReplayPlaying ? "Pause" : "Play"}</span>
                               <kbd className="playback-kbd">Space</kbd>
                             </button>
@@ -5560,7 +5560,7 @@ export default function TradingDesk() {
                             onClick={() => setIsCutMode((prev) => !prev)}
                             title="Cut bar on chart (C)"
                           >
-                            <span>✂ Cut</span>
+                            <span>Cut</span>
                             <kbd className="playback-kbd">C</kbd>
                           </button>
                         </div>
@@ -5851,7 +5851,7 @@ export default function TradingDesk() {
                           className="replay-close-pos-btn"
                           onClick={handleReplayClosePosition}
                         >
-                          ✕ Close Position @ Market
+                          Close Position @ Market
                         </button>
                       </div>
                     ) : (
@@ -6256,9 +6256,9 @@ export default function TradingDesk() {
                       return <details className="paper-review-entry" key={trade.id}>
                         <summary>
                           <span className="paper-review-entry-title"><strong>{trade.symbol}</strong><small>{formatDate(trade.closedAt)} · {strategy}</small></span>
-                          <span className="paper-review-entry-data"><small>{trade.quantity.toFixed(6)} units</small><small>{formatMoney(trade.entryPrice)} → {formatMoney(trade.exitPrice)}</small></span>
+                          <span className="paper-review-entry-data"><small>{trade.quantity.toFixed(6)} units</small><small>{formatMoney(trade.entryPrice)} to {formatMoney(trade.exitPrice)}</small></span>
                           <span className={`paper-review-entry-result ${trade.netPnl >= 0 ? "tone-up" : "tone-down"}`}><strong>{formatMoney(trade.netPnl)}</strong><small>{formatPercent(trade.returnPct)} net</small></span>
-                          <span className="paper-review-entry-toggle">Details <span aria-hidden="true">⌄</span></span>
+                          <span className="paper-review-entry-toggle">Details <Icon name="chevronDown" size={12} /></span>
                         </summary>
                         <div className="paper-review-detail-body">
                           <div className="paper-review-detail-grid">
@@ -7676,7 +7676,7 @@ export default function TradingDesk() {
                 onClick={() => { setMobileMoreOpen(false); setCopilotOpen(true); }}
                 style={{ marginBottom: "8px" }}
               >
-                <span style={{ color: "var(--jade)", fontWeight: 700 }}>✦</span>
+                <Icon name="cpu" size={14} />
                 <span>AI Strategy Copilot (Ctrl+J)</span>
               </button>
               <button
@@ -7706,7 +7706,7 @@ export default function TradingDesk() {
         aria-label="Toggle AI Strategy Copilot (Ctrl+J)"
         title="Toggle AI Strategy Copilot (Ctrl+J)"
       >
-        <span className="floating-copilot-sparkle">✦</span>
+        <span className="floating-copilot-sparkle"><Icon name="cpu" size={14} /></span>
         <span className="floating-copilot-label">AI Copilot</span>
         <span className="floating-copilot-badge">Live</span>
       </button>
@@ -7750,8 +7750,8 @@ function ReportPanel({ report, onPaper, onBacktest, onExportSnapshot }: { report
   return (
     <article className="panel report-panel">
       <div className="report-topline"><div><p className="page-kicker">Research brief · {report.symbol} · {report.interval}</p><h2>{report.question}</h2></div><span className="engine-label">{report.engine}</span></div>
-      <div className="report-facts"><Stat label="Last price" value={formatMoney(market.price)} /><Stat label="24h change" value={`${market.change24h >= 0 ? "+" : ""}${market.change24h.toFixed(2)}%`} tone={market.change24h >= 0 ? "up" : "down"} /><Stat label="RSI (14)" value={indicators.rsi14.toFixed(1)} /><Stat label="Recent range" value={`${formatPrice(indicators.support)} – ${formatPrice(indicators.resistance)}`} /></div>
-      <div className="report-source"><span className="source-check">✓</span><span>Bitget spot candles and ticker</span><time dateTime={new Date(market.asOf).toISOString()}>Data timestamp: {formatDate(market.asOf)}</time></div>
+      <div className="report-facts"><Stat label="Last price" value={formatMoney(market.price)} /><Stat label="24h change" value={`${market.change24h >= 0 ? "+" : ""}${market.change24h.toFixed(2)}%`} tone={market.change24h >= 0 ? "up" : "down"} /><Stat label="RSI (14)" value={indicators.rsi14.toFixed(1)} /><Stat label="Recent range" value={`${formatPrice(indicators.support)} to ${formatPrice(indicators.resistance)}`} /></div>
+      <div className="report-source"><span className="source-check"><Icon name="check" size={12} /></span><span>Bitget spot candles and ticker</span><time dateTime={new Date(market.asOf).toISOString()}>Data timestamp: {formatDate(market.asOf)}</time></div>
       <div className="report-summary"><span className="summary-label">Current read</span><p>{report.summary}</p>{report.commentary ? <p className="llm-commentary">{report.commentary}</p> : null}</div>
       {report.webResearchIncluded ? <section className="news-context"><div><span className="summary-label">Live research</span><h3>News and event context</h3></div><p>{report.newsContext || "The search did not return a relevant source for this brief."}</p><CitationList sources={report.sources ?? []} /></section> : null}
       <div className="thesis-grid"><section className="thesis-card thesis-bull"><div className="thesis-heading"><span className="thesis-symbol">+</span><h3>What could support price</h3></div><p>{report.bullCase}</p></section><section className="thesis-card thesis-bear"><div className="thesis-heading"><span className="thesis-symbol">−</span><h3>What could weaken the read</h3></div><p>{report.bearCase}</p></section></div>
@@ -7935,7 +7935,7 @@ function ResearchLoadingStatus({
               className={`pipeline-step ${isDone ? "is-done" : isActive ? "is-active" : "is-pending"}`}
             >
               <span className="step-indicator">
-                {isDone ? "✓" : isActive ? <span className="step-spinner" /> : idx + 1}
+                {isDone ? <Icon name="check" size={11} /> : isActive ? <span className="step-spinner" /> : idx + 1}
               </span>
               <span className="step-name">{stage.shortLabel}</span>
             </div>
@@ -7945,7 +7945,7 @@ function ResearchLoadingStatus({
 
       <p className="research-model-hint">
         {aiModel.includes("glm") || aiModel.includes("nvidia")
-          ? "NVIDIA NIM MoE models perform comprehensive chain-of-thought analysis before outputting the structured brief (~10–25s)."
+          ? "NVIDIA NIM MoE models perform comprehensive chain-of-thought analysis before outputting the structured brief (~10 to 25s)."
           : "Grounded in Bitget public spot data. The model computes structural support, resistance, and invalidation conditions."}
       </p>
     </div>
@@ -8125,7 +8125,7 @@ function BacktestLoadingStatus({
           return (
             <div key={step.label} className={`pipeline-step ${isDone ? "is-done" : isActive ? "is-active" : "is-pending"}`}>
               <span className="step-indicator">
-                {isDone ? "✓" : isActive ? <span className="step-spinner" /> : idx + 1}
+                {isDone ? <Icon name="check" size={11} /> : isActive ? <span className="step-spinner" /> : idx + 1}
               </span>
               <span className="step-name">{step.shortLabel}</span>
             </div>

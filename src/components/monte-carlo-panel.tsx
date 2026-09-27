@@ -174,8 +174,8 @@ export function MonteCarloPanel({ trades, startingBalance = 10000 }: MonteCarloP
           <span className="mc-chart-title">Stochastic Equity Cone (90% Confidence Envelope)</span>
           <div className="mc-legend">
             <span className="legend-item"><span className="swatch baseline-swatch" />Start (${startingBalance.toLocaleString()})</span>
-            <span className="legend-item"><span className="swatch cone-outer" />90% CI (5th–95th)</span>
-            <span className="legend-item"><span className="swatch cone-inner" />50% IQR (25th–75th)</span>
+            <span className="legend-item"><span className="swatch cone-outer" />90% CI (5th to 95th)</span>
+            <span className="legend-item"><span className="swatch cone-inner" />50% IQR (25th to 75th)</span>
             <span className="legend-item"><span className="swatch line-median" />Median Path (50th)</span>
           </div>
         </div>

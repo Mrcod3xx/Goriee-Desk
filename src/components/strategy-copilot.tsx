@@ -378,7 +378,7 @@ export function StrategyCopilot({
       const errorMessage: CopilotMessage = {
         id: "msg_" + Date.now(),
         role: "assistant",
-        content: `⚠️ **Copilot Error:** ${errorMsg}\n\nPlease check AI router settings or try again.`,
+        content: `**Copilot Error:** ${errorMsg}\n\nPlease check AI router settings or try again.`,
         timestamp: Date.now(),
       };
       setSessions((prev) =>
@@ -493,7 +493,6 @@ export function StrategyCopilot({
         <div className="copilot-header">
           <div className="copilot-header-info">
             <div className="copilot-title-row">
-              <span className="copilot-sparkle">✦</span>
               <h3 className="copilot-title">Strategy Copilot</h3>
               <span className="copilot-live-chip">Live Bitget</span>
             </div>
@@ -517,7 +516,7 @@ export function StrategyCopilot({
             </div>
           </div>
           <button type="button" className="copilot-close-btn" onClick={onClose} aria-label="Close Copilot">
-            ✕
+            <span aria-hidden="true">&times;</span>
           </button>
         </div>
 
@@ -564,7 +563,7 @@ export function StrategyCopilot({
         <div className="copilot-messages-container">
           {(!activeSession || activeSession.messages.length === 0) && !isStreaming ? (
             <div className="copilot-empty-state">
-              <div className="empty-state-badge">✦ Quant Pair-Programmer</div>
+              <div className="empty-state-badge">Quant Pair-Programmer</div>
               <h4 className="empty-state-heading">How can I assist your {symbol} strategy?</h4>
               <p className="empty-state-desc">
                 Ask about current order flow, calculate Kelly position sizing, or test hypotheses against historical Bitget candles.
@@ -579,7 +578,7 @@ export function StrategyCopilot({
                     className="starter-chip"
                     onClick={() => handleSendMessage(chip)}
                   >
-                    {chip} →
+                    {chip}
                   </button>
                 ))}
               </div>
@@ -593,7 +592,7 @@ export function StrategyCopilot({
             >
               {msg.role === "assistant" ? (
                 <div className="assistant-header-strip">
-                  <span className="copilot-avatar">✦</span>
+                  <span className="copilot-avatar">AI</span>
                   <span className="copilot-name">Copilot</span>
                   {aiModel ? <span className="copilot-model-tag">{aiModel}</span> : null}
                   <button
@@ -631,7 +630,7 @@ export function StrategyCopilot({
             <div className="copilot-message-bubble is-assistant is-streaming">
               <div className="assistant-header-strip is-streaming-header">
                 <div className="header-left-meta">
-                  <span className="copilot-avatar">✦</span>
+                  <span className="copilot-avatar">AI</span>
                   <span className="copilot-name">Copilot</span>
                   {aiModel ? <span className="copilot-model-tag">{aiModel}</span> : null}
                   <span className="copilot-elapsed-badge">{streamElapsed.toFixed(1)}s</span>

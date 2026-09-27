@@ -834,6 +834,116 @@ test("Trade Replay Simulator: execution, bracket triggers, and scorecard calcula
   assert.ok(scorecard.profitFactor > 0);
 });
 
+test("Quantitative Backtest: validateStrategyDraft resiliently normalizes RSI and EMA bounds", async () => {
+  const { validateStrategyDraft } = await import("../src/lib/backtest.ts");
+
+  // 1. Standard RSI strategy
+  const stdRsi = validateStrategyDraft({
+    supported: true,
+    reason: "",
+    kind: "rsi_reversion",
+    fastPeriod: null,
+    slowPeriod: null,
+    rsiPeriod: 14,
+    entryBelow: 30,
+    exitAbove: 70,
+    summary: "",
+    rationale: "Prompted RSI reversion",
+  }, 100);
+  assert.equal(stdRsi.kind, "rsi_reversion");
+  assert.equal(stdRsi.rsiPeriod, 14);
+  assert.equal(stdRsi.entryBelow, 30);
+  assert.equal(stdRsi.exitAbove, 70);
+
+  // 2. Out-of-bounds RSI thresholds (like the issue reported: entry 45, exit 85)
+  const oobRsi = validateStrategyDraft({
+    supported: true,
+    reason: "",
+    kind: "rsi_reversion",
+    fastPeriod: null,
+    slowPeriod: null,
+    rsiPeriod: 14,
+    entryBelow: 45,
+    exitAbove: 85,
+    summary: "",
+    rationale: "High boundary RSI test",
+  }, 100);
+  assert.equal(oobRsi.kind, "rsi_reversion");
+  assert.equal(oobRsi.entryBelow, 45);
+  assert.equal(oobRsi.exitAbove, 85);
+  assert.ok(oobRsi.supported);
+
+  // 3. Extreme RSI thresholds clamped safely without throwing
+  const extremeRsi = validateStrategyDraft({
+    supported: true,
+    reason: "",
+    kind: "rsi_reversion",
+    fastPeriod: null,
+    slowPeriod: null,
+    rsiPeriod: 1, // too low -> clamped to 2
+    entryBelow: 3, // too low -> clamped to 5
+    exitAbove: 99, // too high -> clamped to 95
+    summary: "",
+    rationale: "Extreme bounds test",
+  }, 100);
+  assert.equal(extremeRsi.kind, "rsi_reversion");
+  assert.equal(extremeRsi.rsiPeriod, 14);
+  assert.equal(extremeRsi.entryBelow, 5);
+  assert.equal(extremeRsi.exitAbove, 95);
+  assert.ok(extremeRsi.rationale.includes("Thresholds normalized to valid bounds"));
+
+  // 4. Inverted RSI thresholds (exit <= entry) auto-corrected
+  const invertedRsi = validateStrategyDraft({
+    supported: true,
+    reason: "",
+    kind: "rsi_reversion",
+    fastPeriod: null,
+    slowPeriod: null,
+    rsiPeriod: 14,
+    entryBelow: 40,
+    exitAbove: 35,
+    summary: "",
+    rationale: "Inverted test",
+  }, 100);
+  assert.ok(invertedRsi.exitAbove > invertedRsi.entryBelow);
+
+  // 5. Out-of-bounds EMA crossover normalized without crashing
+  const oobEma = validateStrategyDraft({
+    supported: true,
+    reason: "",
+    kind: "ema_cross",
+    fastPeriod: 55,
+    slowPeriod: 220,
+    rsiPeriod: null,
+    entryBelow: null,
+    exitAbove: null,
+    summary: "",
+    rationale: "EMA crossover",
+  }, 300);
+  assert.equal(oobEma.kind, "ema_cross");
+  assert.equal(oobEma.fastPeriod, 55);
+  assert.equal(oobEma.slowPeriod, 220);
+  assert.ok(oobEma.slowPeriod > oobEma.fastPeriod);
+
+  // 6. Unsupported rule rejects with informative reason
+  assert.throws(
+    () => validateStrategyDraft({
+      supported: false,
+      reason: "Shorts with leverage are unsupported.",
+      kind: "unsupported",
+      fastPeriod: null,
+      slowPeriod: null,
+      rsiPeriod: null,
+      entryBelow: null,
+      exitAbove: null,
+      summary: "",
+      rationale: "",
+    }, 100),
+    /Shorts with leverage are unsupported/
+  );
+});
+
+
 
 
 

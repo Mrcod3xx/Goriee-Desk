@@ -1,4 +1,4 @@
-import { ema, type Candle } from "@/lib/bitget";
+import { ema, type Candle } from "./bitget.ts";
 
 export type StrategyPlan =
   | {
@@ -121,31 +121,73 @@ export function validateStrategyDraft(draft: StrategyDraft, bars: number): Strat
   }
 
   if (draft.kind === "ema_cross") {
-    const fastPeriod = Number(draft.fastPeriod);
-    const slowPeriod = Number(draft.slowPeriod);
-    if (!Number.isInteger(fastPeriod) || fastPeriod < 3 || fastPeriod > 50 ||
-        !Number.isInteger(slowPeriod) || slowPeriod <= fastPeriod || slowPeriod > 200 || slowPeriod + 2 >= bars) {
-      throw new Error("The AI produced EMA periods outside the supported range. Try specifying a fast EMA of 3–50 and a slower EMA up to 200.");
+    const rawFast = Math.round(Number(draft.fastPeriod));
+    const rawSlow = Math.round(Number(draft.slowPeriod));
+
+    let fastPeriod = Number.isFinite(rawFast) && rawFast >= 2
+      ? Math.max(2, Math.min(100, rawFast))
+      : 20;
+
+    let slowPeriod = Number.isFinite(rawSlow) && rawSlow > fastPeriod
+      ? Math.max(fastPeriod + 1, Math.min(Math.min(300, bars - 3), rawSlow))
+      : Math.min(Math.min(300, bars - 3), Math.max(fastPeriod + 1, 50));
+
+    if (slowPeriod <= fastPeriod) {
+      slowPeriod = Math.min(bars - 3, fastPeriod + 5);
+      if (slowPeriod <= fastPeriod) {
+        fastPeriod = Math.max(2, slowPeriod - 1);
+      }
     }
+
+    const wasAdjusted = (Number.isFinite(rawFast) && fastPeriod !== rawFast) ||
+      (Number.isFinite(rawSlow) && slowPeriod !== rawSlow);
+
+    const adjustmentNote = wasAdjusted
+      ? ` (Periods normalized: fast EMA ${fastPeriod}, slow EMA ${slowPeriod}).`
+      : "";
+
     return {
       supported: true,
       kind: "ema_cross",
       fastPeriod,
       slowPeriod,
       summary: `Enter long at the next candle open after EMA ${fastPeriod} crosses above EMA ${slowPeriod}; exit at the next open after it crosses below.`,
-      rationale: cleanText(draft.rationale, "The AI mapped your prompt to an EMA crossover rule."),
+      rationale: cleanText(draft.rationale, "The AI mapped your prompt to an EMA crossover rule.") + adjustmentNote,
     };
   }
 
   if (draft.kind === "rsi_reversion") {
-    const rsiPeriod = Number(draft.rsiPeriod);
-    const entryBelow = Number(draft.entryBelow);
-    const exitAbove = Number(draft.exitAbove);
-    if (!Number.isInteger(rsiPeriod) || rsiPeriod < 5 || rsiPeriod > 30 ||
-        !Number.isFinite(entryBelow) || entryBelow < 10 || entryBelow > 40 ||
-        !Number.isFinite(exitAbove) || exitAbove < 50 || exitAbove > 80 || exitAbove <= entryBelow || rsiPeriod + 2 >= bars) {
-      throw new Error("The AI produced RSI settings outside the supported range. Try an entry threshold from 10–40 and an exit threshold from 50–80.");
+    const rawPeriod = Math.round(Number(draft.rsiPeriod));
+    const rawEntry = Number(draft.entryBelow);
+    const rawExit = Number(draft.exitAbove);
+
+    const rsiPeriod = Number.isFinite(rawPeriod) && rawPeriod >= 2
+      ? Math.min(Math.min(50, bars - 3), Math.max(2, rawPeriod))
+      : 14;
+
+    let entryBelow = Number.isFinite(rawEntry)
+      ? Math.max(5, Math.min(49, Math.round(rawEntry * 10) / 10))
+      : 30;
+
+    let exitAbove = Number.isFinite(rawExit)
+      ? Math.max(entryBelow + 1, Math.min(95, Math.round(rawExit * 10) / 10))
+      : 70;
+
+    if (exitAbove <= entryBelow) {
+      exitAbove = Math.min(95, entryBelow + 10);
+      if (exitAbove <= entryBelow) {
+        entryBelow = Math.max(5, exitAbove - 10);
+      }
     }
+
+    const wasAdjusted = (Number.isFinite(rawEntry) && Math.abs(entryBelow - rawEntry) > 0.01) ||
+      (Number.isFinite(rawExit) && Math.abs(exitAbove - rawExit) > 0.01) ||
+      (Number.isFinite(rawPeriod) && rsiPeriod !== rawPeriod);
+
+    const adjustmentNote = wasAdjusted
+      ? ` (Thresholds normalized to valid bounds: RSI ${rsiPeriod}, entry below ${entryBelow}, exit above ${exitAbove}).`
+      : "";
+
     return {
       supported: true,
       kind: "rsi_reversion",
@@ -153,7 +195,7 @@ export function validateStrategyDraft(draft: StrategyDraft, bars: number): Strat
       entryBelow,
       exitAbove,
       summary: `Enter long at the next candle open while RSI (${rsiPeriod}) is below ${entryBelow}; exit at the next open after RSI exceeds ${exitAbove}.`,
-      rationale: cleanText(draft.rationale, "The AI mapped your prompt to an RSI mean-reversion rule."),
+      rationale: cleanText(draft.rationale, "The AI mapped your prompt to an RSI mean-reversion rule.") + adjustmentNote,
     };
   }
 

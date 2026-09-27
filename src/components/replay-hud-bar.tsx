@@ -62,7 +62,7 @@ export function ReplayHudBar({
     : 0;
 
   const formattedDate = useMemo(() => {
-    if (!currentCandle?.time) return "—";
+    if (!currentCandle?.time) return "n/a";
     const date = new Date(currentCandle.time);
     return date.toLocaleDateString("en-US", {
       month: "short",
@@ -89,7 +89,6 @@ export function ReplayHudBar({
           title={isCutMode ? "Cut mode active: click a candle on the chart to rewind" : "Click to select a cut point on the chart"}
           aria-pressed={isCutMode}
         >
-          <span className="btn-icon">✂</span>
           <span>{isCutMode ? "Selecting Bar…" : "Cut Bar"}</span>
         </button>
 
@@ -123,7 +122,7 @@ export function ReplayHudBar({
             title={isPlaying ? "Pause playback (Space)" : "Play candle tape (Space)"}
             aria-label={isPlaying ? "Pause" : "Play"}
           >
-            {isPlaying ? "⏸" : "▶"}
+            {isPlaying ? "Pause" : "Play"}
           </button>
 
           <button
@@ -220,7 +219,7 @@ export function ReplayHudBar({
               onClick={onClosePosition}
               title="Close current replay position at market"
             >
-              ✕ Close
+              Close Position
             </button>
           ) : null}
         </div>

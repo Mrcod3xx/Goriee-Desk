@@ -1,5 +1,5 @@
 /**
- * Portfolio Analytics — Pure computation functions for paper trade performance analysis.
+ * Portfolio Analytics: Pure computation functions for paper trade performance analysis.
  * All functions are stateless and deterministic.
  */
 

@@ -240,7 +240,7 @@ export function StrategyCardModal({
   if (!open || !data) return null;
 
   const handleCopyMarkdown = () => {
-    const md = `### 🏛️ GORIEE AI DESK · STRATEGY BRIEF
+    const md = `### GORIEE AI DESK · STRATEGY BRIEF
 **Asset:** ${data.symbol} | **Interval:** ${data.interval}
 **Regime:** ${data.regime}
 **Price:** $${data.price ? data.price.toLocaleString() : "n/a"} | **RSI (14):** ${data.rsi ?? "n/a"}
@@ -286,7 +286,7 @@ ${data.invalidation || data.bearCase || "n/a"}
             <p>1200×675 high-DPI artifact for sharing, team review, and strategy documentation.</p>
           </div>
           <button type="button" className="icon-close-btn" onClick={onClose} aria-label="Close modal">
-            ✕
+            <span aria-hidden="true">&times;</span>
           </button>
         </div>
 
@@ -300,7 +300,7 @@ ${data.invalidation || data.bearCase || "n/a"}
             className="button button-secondary"
             onClick={handleCopyMarkdown}
           >
-            {copied ? "✓ Copied to Clipboard" : "📋 Copy Markdown"}
+            {copied ? "Copied to Clipboard" : "Copy Markdown"}
           </button>
           <button
             type="button"
@@ -308,7 +308,7 @@ ${data.invalidation || data.bearCase || "n/a"}
             onClick={handleDownloadPng}
             disabled={downloading}
           >
-            {downloading ? "Generating…" : "🖼️ Download PNG Card"}
+            {downloading ? "Generating…" : "Download PNG Card"}
           </button>
           <button type="button" className="button button-secondary" onClick={onClose}>
             Close

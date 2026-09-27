@@ -86,7 +86,7 @@ async function verifyPaperAccount() {
     const hBtns = await page.$$(".paper-heading-actions button");
     for (const btn of hBtns) {
       const text = await btn.evaluate((el) => el.textContent);
-      if (text && text.includes("Account overview")) {
+      if (text && (text.includes("Account") || text.includes("Account overview"))) {
         await btn.click();
         break;
       }

@@ -28,7 +28,6 @@ export function ReplayScorecardModal({
       <div className="replay-scorecard-modal" onClick={(e) => e.stopPropagation()}>
         <div className="replay-modal-header">
           <div className="modal-title-group">
-            <span className="modal-icon">📊</span>
             <div>
               <h3>Replay Session Scorecard</h3>
               <p className="modal-subtitle">
@@ -42,7 +41,7 @@ export function ReplayScorecardModal({
             onClick={onClose}
             aria-label="Close scorecard"
           >
-            ✕
+            <span aria-hidden="true">&times;</span>
           </button>
         </div>
 
@@ -126,7 +125,7 @@ export function ReplayScorecardModal({
                       </td>
                       <td>
                         <span className="exit-reason-badge">
-                          {t.exitReason === "take_profit" ? "🎯 Take Profit" : t.exitReason === "stop_loss" ? "🛑 Stop Loss" : "Manual Close"}
+                          {t.exitReason === "take_profit" ? "Take Profit" : t.exitReason === "stop_loss" ? "Stop Loss" : "Manual Close"}
                         </span>
                       </td>
                     </tr>

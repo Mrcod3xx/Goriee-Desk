@@ -192,7 +192,7 @@ Identify key cross-timeframe support/resistance confluence zones, high-probabili
                             : ""
                         }
                       >
-                        {h.rsi14 !== null ? h.rsi14.toFixed(1) : "—"}
+                        {h.rsi14 !== null ? h.rsi14.toFixed(1) : "n/a"}
                       </strong>
                     </div>
 
@@ -205,14 +205,14 @@ Identify key cross-timeframe support/resistance confluence zones, high-probabili
                       >
                         {h.macdHist !== null
                           ? `${h.macdHist >= 0 ? "+" : ""}${h.macdHist.toFixed(2)}`
-                          : "—"}
+                          : "n/a"}
                       </strong>
                     </div>
 
                     <div className="horizon-metric-row">
                       <span>ATR (14)</span>
                       <span className="atr-subtle">
-                        {h.atrVal !== null ? `$${h.atrVal.toFixed(2)}` : "—"}
+                        {h.atrVal !== null ? `$${h.atrVal.toFixed(2)}` : "n/a"}
                       </span>
                     </div>
                   </div>

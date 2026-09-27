@@ -690,7 +690,7 @@ function DailyPnlCalendar({ data }: { data: DailyPnl[] }) {
                   )}
                 </div>
                 <span className={`pa-weekday-pnl ${item.pnl > 0 ? "text-green" : item.pnl < 0 ? "text-red" : "text-muted"}`}>
-                  {item.trades > 0 ? `${item.pnl >= 0 ? "+" : ""}${formatMoney(item.pnl)}` : "—"}
+                  {item.trades > 0 ? `${item.pnl >= 0 ? "+" : ""}${formatMoney(item.pnl)}` : "n/a"}
                 </span>
               </div>
             ))}

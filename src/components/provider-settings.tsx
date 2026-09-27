@@ -182,7 +182,7 @@ export function ProviderSettings() {
 
       {pingResult ? (
         <div className={`ping-banner ${pingResult.ok ? "ping-success" : "ping-error"}`} role="status">
-          <strong>{pingResult.ok ? "✓ Connection Operational" : "⚠️ Connection Check"}</strong>
+          <strong>{pingResult.ok ? "Connection Operational" : "Connection Check"}</strong>
           <span>{pingResult.message}</span>
         </div>
       ) : null}
@@ -229,7 +229,7 @@ export function ProviderSettings() {
                 >
                   <div className="preset-card-top">
                     <strong>{item.label}</strong>
-                    {isSelected ? <span className="preset-active-check">✓</span> : null}
+                    {isSelected ? <span className="preset-active-check">Active</span> : null}
                   </div>
                   <span className="preset-model-tag">{item.model.split("/").pop()}</span>
                   <p className="preset-desc">{item.description}</p>
@@ -245,7 +245,7 @@ export function ProviderSettings() {
             >
               <div className="preset-card-top">
                 <strong>Custom Router</strong>
-                {provider === "custom" ? <span className="preset-active-check">✓</span> : null}
+                {provider === "custom" ? <span className="preset-active-check">Active</span> : null}
               </div>
               <span className="preset-model-tag">Self-hosted / vLLM</span>
               <p className="preset-desc">Connect any OpenAI-compatible API endpoint with custom model routing.</p>

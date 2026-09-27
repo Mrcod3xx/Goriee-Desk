@@ -127,15 +127,15 @@ export function ParameterHeatmap({
         <div className="robustness-badge-container">
           {isPlateau ? (
             <span className="robustness-status-pill status-plateau">
-              ✓ ROBUST PARAMETER PLATEAU (Low Curve-Fitting Risk)
+              ROBUST PARAMETER PLATEAU (Low Curve-Fitting Risk)
             </span>
           ) : isCliff ? (
             <span className="robustness-status-pill status-cliff">
-              ⚠️ HIGH OVERFITTING RISK (Fragile Cliff)
+              HIGH OVERFITTING RISK (Fragile Cliff)
             </span>
           ) : (
             <span className="robustness-status-pill status-neutral">
-              ● MODERATE SENSITIVITY (Mixed Regimes)
+              MODERATE SENSITIVITY (Mixed Regimes)
             </span>
           )}
         </div>
@@ -187,7 +187,7 @@ export function ParameterHeatmap({
                             <span className="cell-primary-val">{renderCellValue(cell)}</span>
                             <span className="cell-sub-val">{cell.tradeCount} trades</span>
                           </div>
-                          {isBest ? <span className="cell-best-indicator" title="Optimal Combination">★</span> : null}
+                          {isBest ? <span className="cell-best-indicator" title="Optimal Combination">OPT</span> : null}
                         </td>
                       );
                     })}
@@ -206,7 +206,7 @@ export function ParameterHeatmap({
             <div className="inspection-title">
               <strong>{labelA}: {hoveredCell.paramA}</strong> &amp; <strong>{labelB}: {hoveredCell.paramB}</strong>
               {hoveredCell.paramA === bestCell.paramA && hoveredCell.paramB === bestCell.paramB ? (
-                <span className="best-tag">★ Optimal Historical Settings</span>
+                <span className="best-tag">Optimal Historical Settings</span>
               ) : null}
             </div>
             <div className="inspection-stats-strip">
