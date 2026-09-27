@@ -449,5 +449,39 @@ All 13 keys above are covered by the workspace backup allowlist in `src/lib/work
 - **Workspace backup completed (closes handoff item):** `src/lib/workspace-backup.ts` was missing 3 actively used keys — `goriee.auto-rule-runner.v1` (boolean), `goriee.rule-runner-logs.v1` (audit log array), and `goriee_copilot_sessions_v1` (Copilot threads). Added with validators (loose object shape for copilot sessions/messages so future fields do not invalidate backups), duplicate-ID checks extended, and the Settings UI copy updated. New `test/workspace-backup.test.mjs` (4 tests) covers allowlist, round-trip, rejection of invalid/duplicate payloads, and restore semantics. Restore-failure message no longer promises the rollback succeeded.
 - **Research-provenance race fixed (closes handoff item #2):** `handleBacktestFromReport()` used to `setSeededResearchReport(report)` and call `runBacktest()` in the same closure; the result merge read the *stale* state, so a backtest could be tagged with the previous report. `runBacktest` overrides now accept an explicit `researchRef`, which `handleBacktestFromReport` passes directly; the seeded-report fallback additionally requires symbol AND interval to match the request.
 - **Doc corrections:** `goriee.paper-risk.v1` is stored as a plain number (older sections said `{ dailyLossLimit: number }`); the deterministic backtest fallback compiler is still wired in as the 15s race fallback in `src/app/api/backtest/route.ts` (the Sept 25 handoff claimed its call was removed — it was not).
-- **Still open (from `CODEX_HANDOFF_2026-09-25.md`):** recovery/cooldown UX consistency (item #3), restore-integrity edge cases like quota failure mid-restore and automation running during restore (item #4), bracket safeguards for stale quotes and re-opened positions (item #5). Also outstanding from this review: pin `package.json` deps (currently `"latest"`), add ESLint, decompose the 7,700-line `trading-desk.tsx` and 11,600-line `globals.css`, and prune one-off `test/verify-*.mjs` scripts and committed screenshots.
+- **Still open (from `CODEX_HANDOFF_2026-09-25.md`):** All 5 handoff items (AI recovery & provenance #1/#2, cooldown UX #3, restore quota & runner safety #4, bracket safeguards #5, paper accounting #6) are now closed in Sprint 19 and 20. Outstanding architectural tech debt: pin `package.json` deps (currently `"latest"`), add ESLint, decompose the 7,700-line `trading-desk.tsx` and 11,600-line `globals.css`, and prune one-off `test/verify-*.mjs` scripts and committed screenshots.
+
+---
+
+## 🛡️ 20. Comprehensive Reliability & Safeguards Release (Sprint 20 - September 27, 2026)
+
+- **Closed all remaining items from `CODEX_HANDOFF_2026-09-25.md` (#3, #4, #5, #6):**
+  - **Bracket Lifecycle & Freshness Guard (Closes Handoff #5):**
+    - Updated `src/app/api/tickers/route.ts` to return an `asOf` epoch timestamp per quote and in the top-level payload.
+    - Added `asOf?: number` to `Quote` type in `src/components/trading-desk.tsx`.
+    - In the background bracket evaluation loop, quotes older than 120s (`Date.now() - quote.asOf > 120_000`) or quotes with missing timestamps automatically pause execution.
+    - Added `.bracket-stale-badge` amber indicator in the Paper Account table: `● Quotes stale >2m (Paused)`.
+    - Full manual sells (`quantity >= held - 1e-8`) immediately prune `paperBrackets[symbol]`.
+    - Unbracketed new buys (`orderSide === "buy" && !attachBracket`) and auto-rule-runner fills evict orphan/stale brackets on that symbol.
+    - Created `test/bracket-lifecycle.test.mjs` (6/6 tests passing) verifying fresh execution, stale quote pause, missing timestamp handling, trailing stop updates, and bracket pruning on full/unbracketed orders.
+  - **Persistent Cooldown UX & Dynamic Buttons (Closes Handoff #3):**
+    - Added `storageKeys.aiCooldown = "goriee.ai-cooldown.v1"` to persist provider rate-limit wait times across page reloads.
+    - Added 1-second interval ticker for `cooldownSeconds = Math.max(0, Math.ceil((aiRetryAt - now) / 1000))`.
+    - Wired cooldown disabled state and dynamic labels across all AI submit action buttons:
+      - Desk "Ask the desk" submit button: `⏳ Cooldown (${cooldownSeconds}s)`.
+      - Research Tab submit button: `⏳ Cooldown (${cooldownSeconds}s)`.
+      - Backtest Strategy Builder submit button: `⏳ Cooldown (${cooldownSeconds}s)`.
+      - Copilot input send button & `Enter` handler: disabled with countdown label and tooltip.
+  - **Atomic Workspace Restore & Storage Quota Probing (Closes Handoff #4):**
+    - In `src/lib/workspace-backup.ts`: added pre-flight probe write to `__goriee_quota_probe__` before wiping storage. If quota is exceeded, throws `"Browser storage quota exceeded. The backup is too large to restore in this browser."` before touching existing keys.
+    - Supported empty workspace `{ data: {} }` backups cleanly in `parseWorkspaceBackup`.
+    - In `src/components/workspace-backup.tsx`: automatically pauses auto-rule-runner before restore and provides honest rollback error reporting.
+    - Extended `test/workspace-backup.test.mjs` (6/6 tests passing) to verify empty backup restore and simulated quota probe rejection.
+  - **Paper Accounting Test Suite (Closes Handoff #6):**
+    - Created `test/paper-accounting.test.mjs` (4/4 tests passing) verifying `paperFillFee`, `paperCash` deductions on both buys and sells, proportional entry fee allocation on partial sells, and the fundamental equity accounting invariant: Realized Net + Unrealized Net == Equity - Starting Cash.
+  - **Verified Test Suite Status:**
+    - Full test suite: **48 tests (47 pass, 0 fail, 1 skipped)** (`npm test`).
+    - Unit test suite: **37/37 pass** (`npm run test:unit`).
+    - TypeScript: **0 errors** (`npx tsc --noEmit`).
+
 

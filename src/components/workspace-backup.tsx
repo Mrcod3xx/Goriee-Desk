@@ -28,8 +28,14 @@ export function WorkspaceBackup() {
       } catch (error) { setMessage(error instanceof Error ? error.message : "Invalid backup."); }
     }} /></label></div>
     {pending ? <div className="backup-preview"><h3>Restore preview</h3><p>Saved {new Date(pending.exportedAt).toLocaleString()}. {Object.entries(pending.data).filter(([, value]) => Array.isArray(value)).map(([key, value]) => `${key.replace("goriee.", "").replace(".v1", "")}: ${(value as unknown[]).length}`).join(" · ")}</p><p>Restore replaces the saved workspace at this address. A copy of your current workspace will download first. The page then reloads.</p><button className="button button-primary" onClick={() => {
-      try { download(captureWorkspace(localStorage), "goriee-before-restore"); restoreWorkspace(localStorage, pending); window.location.reload(); }
-      catch { setMessage("Restore failed. A rollback to your previous storage was attempted but may be incomplete. Verify your data before continuing, check available browser storage, and try again."); }
+      try {
+        try { window.localStorage.setItem("goriee.auto-rule-runner.v1", "false"); } catch {}
+        download(captureWorkspace(localStorage), "goriee-before-restore");
+        restoreWorkspace(localStorage, pending);
+        window.location.reload();
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "Restore failed. Verify available browser storage and your backup file.");
+      }
     }}>Replace workspace with this backup</button><button className="button button-secondary" onClick={() => setPending(null)}>Cancel restore</button></div> : null}
     {message ? <p role="status">{message}</p> : null}
   </section>;

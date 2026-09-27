@@ -22,6 +22,8 @@ interface StrategyCopilotProps {
   paperSnapshot?: PaperContextSnapshot;
   aiConfigured: boolean | null;
   aiModel: string | null;
+  cooldownSeconds?: number;
+  onSetCooldown?: (retryAt: number) => void;
   onLoadOrder: (action: any) => void;
   onRunBacktest: (action: any) => void;
   onSavePlaybook: (action: any) => void;
@@ -120,6 +122,8 @@ export function StrategyCopilot({
   paperSnapshot,
   aiConfigured,
   aiModel,
+  cooldownSeconds,
+  onSetCooldown,
   onLoadOrder,
   onRunBacktest,
   onSavePlaybook,
@@ -248,7 +252,7 @@ export function StrategyCopilot({
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputValue).trim();
-    if (!query || isStreaming) return;
+    if (!query || isStreaming || (cooldownSeconds ?? 0) > 0) return;
 
     setInputValue("");
 
@@ -322,6 +326,9 @@ export function StrategyCopilot({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        if (typeof errorData.retryAt === "number" && onSetCooldown) {
+          onSetCooldown(errorData.retryAt);
+        }
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
@@ -441,6 +448,7 @@ export function StrategyCopilot({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if ((cooldownSeconds ?? 0) > 0 || isStreaming) return;
       void handleSendMessage();
     }
   };
@@ -737,10 +745,11 @@ export function StrategyCopilot({
             <button
               type="button"
               className="copilot-send-button button button-primary"
-              disabled={!inputValue.trim() || aiConfigured === false}
+              disabled={!inputValue.trim() || aiConfigured === false || (cooldownSeconds ?? 0) > 0}
               onClick={() => void handleSendMessage()}
+              title={(cooldownSeconds ?? 0) > 0 ? `Provider cooldown active (${cooldownSeconds}s)` : "Send message to Copilot"}
             >
-              <span>Send ↵</span>
+              <span>{(cooldownSeconds ?? 0) > 0 ? `${cooldownSeconds}s` : "Send ↵"}</span>
             </button>
           )}
         </div>

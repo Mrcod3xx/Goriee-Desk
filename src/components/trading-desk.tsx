@@ -136,7 +136,7 @@ type PaperLedgerPosition = {
   backtestRefs: Map<string, PaperBacktestRef>;
   playbookNames: Set<string>;
 };
-type Quote = { symbol: string; price: number; change24h: number };
+type Quote = { symbol: string; price: number; change24h: number; asOf?: number };
 type OpenPaperPosition = { symbol: string; quantity: number; averageEntry: number; entryFees: number };
 type PaperAlert = {
   id: string;
@@ -243,6 +243,7 @@ const storageKeys = {
   paperBrackets: "goriee.paper-brackets.v1",
   autoRuleRunner: "goriee.auto-rule-runner.v1",
   ruleRunnerLogs: "goriee.rule-runner-logs.v1",
+  aiCooldown: "goriee.ai-cooldown.v1",
 };
 
 function formatPrice(value: number) {
@@ -1875,8 +1876,33 @@ export default function TradingDesk() {
   const [report, setReport] = useState<Report | null>(null);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchError, setResearchError] = useState("");
-  const [aiRetryAt, setAiRetryAt] = useState(0);
   const requestBusy = useRef(false);
+  const [aiRetryAtState, setAiRetryAtState] = useState<number>(() => {
+    if (typeof window === "undefined") return 0;
+    try {
+      const saved = Number(window.localStorage.getItem("goriee.ai-cooldown.v1") || 0);
+      return Number.isFinite(saved) && saved > Date.now() ? saved : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const aiRetryAt = aiRetryAtState;
+  const setAiRetryAt = (timestamp: number) => {
+    setAiRetryAtState(timestamp);
+    try {
+      if (timestamp > Date.now()) {
+        window.localStorage.setItem(storageKeys.aiCooldown, String(timestamp));
+      } else {
+        window.localStorage.removeItem(storageKeys.aiCooldown);
+      }
+    } catch {}
+  };
+  const [clockNow, setClockNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const cooldownSeconds = Math.max(0, Math.ceil((aiRetryAt - clockNow) / 1000));
   const researchAbortRef = useRef<AbortController | null>(null);
   const backtestAbortRef = useRef<AbortController | null>(null);
   const closingAssets = useRef(new Set<string>());
@@ -2371,7 +2397,14 @@ export default function TradingDesk() {
       try {
         const response = await fetch(`/api/tickers?${params}`, { cache: "no-store" });
         const payload = await response.json();
-        if (response.ok && current) setQuotes(payload.quotes ?? []);
+        if (response.ok && current) {
+          const asOf = typeof payload.asOf === "number" ? payload.asOf : Date.now();
+          const nextQuotes = ((payload.quotes ?? []) as Quote[]).map((q) => ({
+            ...q,
+            asOf: typeof q.asOf === "number" ? q.asOf : asOf,
+          }));
+          setQuotes(nextQuotes);
+        }
       } catch {
         // Keep the last quote visible if a refresh fails.
       }
@@ -2437,6 +2470,8 @@ export default function TradingDesk() {
       if (!bracket) return;
       const quote = quotes.find((entry) => entry.symbol === pos.symbol);
       if (!quote || !(quote.price > 0)) return;
+      const quoteAge = quote.asOf ? Date.now() - quote.asOf : Infinity;
+      if (quoteAge > 120_000) return;
 
       if (bracket.takeProfitPrice && quote.price >= bracket.takeProfitPrice) {
         void closePaperPosition(pos.symbol, `Take-Profit hit at ${formatMoney(quote.price)} (+${bracket.takeProfitPct ?? "target"}%)`);
@@ -2907,6 +2942,15 @@ export default function TradingDesk() {
         setPaperMessage(`Your paper account holds ${held.toFixed(6)} ${symbol.replace("USDT", "")} to sell.`);
         return;
       }
+      if (quantity >= held - 1e-8) {
+        setPaperBrackets((previous) => {
+          if (!previous[symbol]) return previous;
+          const next = { ...previous };
+          delete next[symbol];
+          window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+          return next;
+        });
+      }
     }
     const sourcePlaybook = playbooks.find((item) => item.id === activePaperPlaybookId);
     const trade: PaperTrade = {
@@ -2951,6 +2995,14 @@ export default function TradingDesk() {
 
       setPaperBrackets((previous) => {
         const next = { ...previous, [symbol]: bracket };
+        window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+        return next;
+      });
+    } else if (orderSide === "buy" && !attachBracket) {
+      setPaperBrackets((previous) => {
+        if (!previous[symbol]) return previous;
+        const next = { ...previous };
+        delete next[symbol];
         window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
         return next;
       });
@@ -3107,6 +3159,13 @@ export default function TradingDesk() {
             feeBps: targetPlaybook.feeBps || paperFeeBps,
             playbookName: `${targetPlaybook.name} [Auto-Fill]`,
           };
+          setPaperBrackets((previous) => {
+            if (!previous[targetPlaybook.symbol]) return previous;
+            const next = { ...previous };
+            delete next[targetPlaybook.symbol];
+            window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+            return next;
+          });
           setPaperTrades((prev) => {
             const next = [trade, ...prev];
             window.localStorage.setItem(storageKeys.paper, JSON.stringify(next));
@@ -4084,9 +4143,13 @@ export default function TradingDesk() {
                               <button
                                 className="button button-primary research-submit"
                                 type="submit"
-                                disabled={marketLoading || aiConfigured === false}
+                                disabled={marketLoading || aiConfigured === false || requestBusy.current || cooldownSeconds > 0}
                               >
-                                Build research brief <Icon name="arrow" size={16} />
+                                {cooldownSeconds > 0
+                                  ? `⏳ Cooldown (${cooldownSeconds}s)`
+                                  : requestBusy.current
+                                  ? "Request in progress…"
+                                  : <>Build research brief <Icon name="arrow" size={16} /></>}
                               </button>
                             )}
                           </form>
@@ -4262,11 +4325,17 @@ export default function TradingDesk() {
                       ) : (
                         <button
                           className="button button-primary research-submit-btn"
-                          disabled={marketLoading || aiConfigured === false}
+                          disabled={marketLoading || aiConfigured === false || requestBusy.current || cooldownSeconds > 0}
                           type="submit"
                         >
                           <Icon name="research" size={15} />
-                          <span>Research {symbol} ({interval})</span>
+                          <span>
+                            {cooldownSeconds > 0
+                              ? `⏳ Cooldown (${cooldownSeconds}s)`
+                              : requestBusy.current
+                              ? "Request in progress…"
+                              : `Research ${symbol} (${interval})`}
+                          </span>
                         </button>
                       )}
                     </form>
@@ -4665,9 +4734,13 @@ export default function TradingDesk() {
                     <button
                       type="submit"
                       className="button button-primary"
-                      disabled={aiConfigured === false || strategyPrompt.trim().length < 8 || !supportsBacktestWindow(interval, backtestDays)}
+                      disabled={aiConfigured === false || strategyPrompt.trim().length < 8 || !supportsBacktestWindow(interval, backtestDays) || requestBusy.current || cooldownSeconds > 0}
                     >
-                      Compile rule &amp; run backtest
+                      {cooldownSeconds > 0
+                        ? `⏳ Cooldown (${cooldownSeconds}s)`
+                        : requestBusy.current
+                        ? "Simulation in progress…"
+                        : "Compile rule & run backtest"}
                     </button>
                   )}
                 </div>
@@ -6430,6 +6503,11 @@ export default function TradingDesk() {
                     <td>
                       {bracket ? (
                         <div className="bracket-tag">
+                          {quote && (!quote.asOf || clockNow - quote.asOf > 120_000) ? (
+                            <span className="bracket-stale-badge" title="Bitget quote is older than 2 minutes. Bracket evaluation is paused until fresh quotes arrive.">
+                              ● Quotes stale &gt;2m (Paused)
+                            </span>
+                          ) : null}
                           <div className="bracket-tag-pills">
                             {bracket.takeProfitPrice ? <span className="tag-tp">TP: ${formatPrice(bracket.takeProfitPrice)}</span> : null}
                             {bracket.stopLossPrice ? <span className="tag-sl">SL: ${formatPrice(bracket.stopLossPrice)}</span> : null}
@@ -7643,6 +7721,8 @@ export default function TradingDesk() {
         paperSnapshot={copilotPaperSnapshot}
         aiConfigured={aiConfigured}
         aiModel={aiModel}
+        cooldownSeconds={cooldownSeconds}
+        onSetCooldown={setAiRetryAt}
         onLoadOrder={handleCopilotLoadOrder}
         onRunBacktest={handleCopilotRunBacktest}
         onSavePlaybook={handleCopilotSavePlaybook}

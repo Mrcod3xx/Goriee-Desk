@@ -25,14 +25,16 @@ export async function GET(request: NextRequest) {
     if (payload.code && payload.code !== "00000") throw new Error(payload.msg || "Bitget error.");
 
     const requestedSymbols = new Set(symbols);
+    const asOf = Date.now();
     const quotes = (payload.data ?? [])
       .filter((row) => requestedSymbols.has(String(row.symbol).toUpperCase()))
       .map((row) => ({
         symbol: String(row.symbol),
         price: Number(row.lastPrice),
         change24h: Number(row.price24hPcnt) * 100,
+        asOf,
       }));
-    return NextResponse.json({ quotes, asOf: Date.now() });
+    return NextResponse.json({ quotes, asOf });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Watchlist quotes are unavailable.";
     return NextResponse.json({ error: message }, { status: 502 });

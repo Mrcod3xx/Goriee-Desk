@@ -59,3 +59,33 @@ test("Backup: restore replaces all allowlisted keys and tolerates forward-compat
   assert.equal(storage.getItem("goriee.watchlist.v1"), null, "keys absent from the backup must be cleared on restore");
   assert.ok(storage.getItem("goriee_copilot_sessions_v1").includes("futureField"));
 });
+
+test("Backup: supports restoring an empty workspace cleanly", () => {
+  const snapshot = {
+    format: "goriee-workspace", version: 1, exportedAt: new Date().toISOString(),
+    data: {},
+  };
+  const storage = memoryStorage({ "goriee.watchlist.v1": JSON.stringify(["BTCUSDT"]) });
+  restoreWorkspace(storage, snapshot);
+  assert.equal(storage.getItem("goriee.watchlist.v1"), null);
+});
+
+test("Backup: aborts on pre-flight quota probe failure before modifying existing storage", () => {
+  const snapshot = {
+    format: "goriee-workspace", version: 1, exportedAt: new Date().toISOString(),
+    data: { "goriee.watchlist.v1": ["BTCUSDT"] },
+  };
+  const storage = memoryStorage({ "goriee.watchlist.v1": JSON.stringify(["ETHUSDT"]) });
+  // Simulate storage quota exception on probe key
+  const originalSetItem = storage.setItem;
+  storage.setItem = (key, val) => {
+    if (key === "__goriee_quota_probe__") throw new Error("QuotaExceededError");
+    return originalSetItem(key, val);
+  };
+  assert.throws(
+    () => restoreWorkspace(storage, snapshot),
+    /storage quota exceeded/i,
+  );
+  // Verify existing data was untouched
+  assert.equal(storage.getItem("goriee.watchlist.v1"), JSON.stringify(["ETHUSDT"]));
+});

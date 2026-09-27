@@ -7,21 +7,34 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/api.test.mjs",
-    "test:unit": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs",
+    "test": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/api.test.mjs",
+    "test:unit": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs test/copilot-e2e.test.mjs",
-    "test:all": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/api.test.mjs test/e2e.test.mjs test/copilot-e2e.test.mjs"
+    "test:all": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/api.test.mjs test/e2e.test.mjs test/copilot-e2e.test.mjs"
   },
   "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "next": "16.3.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "puppeteer-core": "^25.12.0",
-    "typescript": "latest"
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.6",
+    "puppeteer-core": "25.12.0",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "typescript-eslint": {
+      "typescript": "^6.0.0"
+    },
+    "@typescript-eslint/parser": {
+      "typescript": "^6.0.0"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "typescript": "^6.0.0"
+    }
   }
 }

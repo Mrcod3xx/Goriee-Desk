@@ -55,7 +55,7 @@ export function parseWorkspaceBackup(raw: string): WorkspaceSnapshot {
   const snapshot: unknown = JSON.parse(raw);
   if (!record(snapshot) || snapshot.format !== "goriee-workspace" || snapshot.version !== 1 || typeof snapshot.exportedAt !== "string" || !Number.isFinite(Date.parse(snapshot.exportedAt)) || !record(snapshot.data)) throw new Error("Choose a Goriee workspace backup, version 1.");
   const data = snapshot.data;
-  if (!Object.keys(data).length || !Object.entries(data).every(([key, value]) => Object.hasOwn(schemas, key) && schemas[key](value))) throw new Error("Backup contains unsupported or invalid data. Nothing was changed.");
+  if (!Object.entries(data).every(([key, value]) => Object.hasOwn(schemas, key) && schemas[key](value))) throw new Error("Backup contains unsupported or invalid data. Nothing was changed.");
   for (const key of ["goriee.paper.v1", "goriee.journal.v1", "goriee.playbooks.v1", "goriee.paper-alerts.v1", "goriee.rule-runner-logs.v1", "goriee_copilot_sessions_v1"]) {
     const items = (data[key] ?? []) as Array<{ id: string }>;
     if (new Set(items.map((item) => item.id)).size !== items.length) throw new Error("Backup contains duplicate record IDs.");
@@ -74,13 +74,32 @@ export function captureWorkspace(storage: Pick<Storage, "getItem">): WorkspaceSn
 
 export function restoreWorkspace(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, snapshot: WorkspaceSnapshot) {
   const validated = parseWorkspaceBackup(JSON.stringify(snapshot));
+
+  // Pre-flight quota probe before touching existing storage
+  const serialized = JSON.stringify(validated.data);
+  const probeKey = "__goriee_quota_probe__";
+  try {
+    storage.setItem(probeKey, serialized);
+    storage.removeItem(probeKey);
+  } catch {
+    throw new Error("Browser storage quota exceeded. The backup is too large to restore in this browser.");
+  }
+
   const original = backupKeys.map((key) => [key, storage.getItem(key)] as const);
   try {
     for (const key of backupKeys) storage.removeItem(key);
     for (const [key, value] of Object.entries(validated.data)) storage.setItem(key, JSON.stringify(value));
   } catch (error) {
-    for (const key of backupKeys) storage.removeItem(key);
-    for (const [key, value] of original) if (value !== null) storage.setItem(key, value);
+    let rollbackFailed = false;
+    try {
+      for (const key of backupKeys) storage.removeItem(key);
+      for (const [key, value] of original) if (value !== null) storage.setItem(key, value);
+    } catch {
+      rollbackFailed = true;
+    }
+    if (rollbackFailed) {
+      throw new Error("Restore failed and storage rollback could not be completed. Your pre-restore workspace snapshot was downloaded to your device.");
+    }
     throw error;
   }
 }
