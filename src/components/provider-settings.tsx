@@ -54,6 +54,64 @@ const providerNames: Record<ProviderId, string> = {
   custom: "Custom router",
 };
 
+const quickModels: Array<{
+  name: string;
+  provider: ProviderId;
+  baseUrl: string;
+  model: string;
+  tag: string;
+  notes: string;
+}> = [
+  {
+    name: "DeepSeek R1",
+    provider: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "deepseek/deepseek-r1",
+    tag: "Reasoning Champion",
+    notes: "Deep mathematical reasoning for multi-condition strategy compilation.",
+  },
+  {
+    name: "DeepSeek V3 (Direct)",
+    provider: "custom",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+    tag: "Lowest Token Cost",
+    notes: "Direct platform API with fast token generation & high accuracy.",
+  },
+  {
+    name: "OpenAI GPT-4o-mini",
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    tag: "Sub-Second Latency",
+    notes: "Best for real-time Copilot trade suggestions and instant responses.",
+  },
+  {
+    name: "Claude 3.5 Sonnet",
+    provider: "anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-3-5-sonnet-20241022",
+    tag: "Benchmark Quality",
+    notes: "Anthropic's flagship model for rigorous indicator logic synthesis.",
+  },
+  {
+    name: "NVIDIA Llama 3.3 70B",
+    provider: "nvidia",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    model: "meta/llama-3.3-70b-instruct",
+    tag: "Free Cloud Credits",
+    notes: "Fast NIM inference with 1,000 free tokens upon NVIDIA account sign-up.",
+  },
+  {
+    name: "Local Ollama (Offline)",
+    provider: "custom",
+    baseUrl: "http://localhost:11434/v1",
+    model: "deepseek-r1:14b",
+    tag: "100% Free & Private",
+    notes: "Zero cloud leakage. Runs on local GPU/CPU via `ollama run deepseek-r1:14b`.",
+  },
+];
+
 export function ProviderSettings() {
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [provider, setProvider] = useState<ProviderId>("openrouter");
@@ -64,6 +122,15 @@ export function ProviderSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [copiedEnv, setCopiedEnv] = useState(false);
+
+  function handleCopyEnv() {
+    const keyVal = apiKey || (status?.keyConfigured ? "YOUR_SAVED_KEY" : "YOUR_API_KEY");
+    const snippet = `# Goriee AI Desk Configuration\nLLM_BASE_URL="${baseUrl}"\nLLM_MODEL="${model}"\nLLM_API_KEY="${keyVal}"`;
+    navigator.clipboard.writeText(snippet);
+    setCopiedEnv(true);
+    setTimeout(() => setCopiedEnv(false), 2000);
+  }
 
   async function refreshStatus() {
     const response = await fetch("/api/ai-status", { cache: "no-store" });
@@ -270,6 +337,93 @@ export function ProviderSettings() {
             <li>OpenAI API keys use direct API billing. ChatGPT Plus consumer subscriptions do not include API credits.</li>
             <li>Claude uses Anthropic’s native Messages API with strict JSON schema outputs for rule synthesis.</li>
           </ul>
+        </div>
+
+        {/* Informative AI Switching Handout & Reference Manual */}
+        <div className="panel ai-handout-section" role="region" aria-labelledby="ai-handout-title">
+          <div className="ai-handout-heading">
+            <div>
+              <div className="ai-handout-title-row">
+                <span className="ai-handout-badge">Informative Handout</span>
+                <h2 id="ai-handout-title">AI Model Switcher &amp; Operator Handout</h2>
+              </div>
+              <p className="ai-handout-subtitle">
+                Switch between cloud reasoning engines or 100% private local models. Click any verified model below to pre-populate settings, or copy the configuration block directly into your <code>.env.local</code>.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button button-secondary ai-handout-env-btn"
+              onClick={handleCopyEnv}
+              title="Copy current settings as .env.local file block"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span>{copiedEnv ? "Copied .env block!" : "Copy .env.local"}</span>
+            </button>
+          </div>
+
+          {/* Quick-fill model cards */}
+          <div className="ai-handout-grid">
+            {quickModels.map((item) => (
+              <div
+                key={item.name}
+                className={`ai-handout-card ${model === item.model && baseUrl === item.baseUrl ? "is-active" : ""}`}
+                onClick={() => {
+                  setProvider(item.provider);
+                  setBaseUrl(item.baseUrl);
+                  setModel(item.model);
+                  if (item.provider === "custom" && item.baseUrl.includes("11434")) {
+                    setApiKey("ollama");
+                  }
+                  setMessage(`Loaded ${item.name} (${item.model}) into form.`);
+                  setError("");
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="ai-handout-card-top">
+                  <strong className="ai-handout-card-title">{item.name}</strong>
+                  <span className="ai-handout-card-tag">{item.tag}</span>
+                </div>
+                <code className="ai-handout-card-model">{item.model}</code>
+                <p className="ai-handout-card-notes">{item.notes}</p>
+                <span className="ai-handout-card-action">
+                  {model === item.model && baseUrl === item.baseUrl ? "✓ Loaded in Form" : "Click to Load →"}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Informative Handout Guidance Breakdown */}
+          <div className="ai-handout-guide-grid">
+            <div className="ai-handout-guide-box">
+              <strong>1. How AI Switching Works</strong>
+              <p>
+                When you save settings here, the backend updates your local <code>.env.local</code> file and reloads <code>src/lib/llm.ts</code>. The AI Copilot, Quantitative Backtest compiler, and Market Research immediately start routing prompts through your newly configured model.
+              </p>
+            </div>
+            <div className="ai-handout-guide-box">
+              <strong>2. Model Compatibility Rules</strong>
+              <p>
+                Any model you connect must accept system prompts and return pure JSON objects. Models like <code>deepseek-r1</code>, <code>gpt-4o-mini</code>, and <code>claude-3-5-sonnet</code> have 100% JSON schema adherence and do not hallucinate extraneous conversation.
+              </p>
+            </div>
+            <div className="ai-handout-guide-box">
+              <strong>3. Zero-Cost Local Inference (Ollama)</strong>
+              <p>
+                Run <code>ollama run deepseek-r1:14b</code> in your terminal. Set endpoint to <code>http://localhost:11434/v1</code>, model to <code>deepseek-r1:14b</code>, and key to <code>ollama</code>. 100% private, free, and runs entirely on your own machine.
+              </p>
+            </div>
+            <div className="ai-handout-guide-box">
+              <strong>4. Offline Documentation Handout</strong>
+              <p>
+                A complete technical reference manual is saved in the workspace root at <code>AI_SWITCHING_HANDOUT.md</code> for offline reading, team distribution, or handing off to another AI assistant.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
     </>

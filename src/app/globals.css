@@ -3719,6 +3719,182 @@ select:disabled {
 .provider-guidance strong { color: #34483e; font-size: 12.5px; }
 .provider-guidance ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 22px; padding-left: 17px; margin: 8px 0 0; font-size: 12px; }
 
+/* AI Switching Handout & Quickstart Reference */
+.ai-handout-section {
+  grid-column: 1 / -1;
+  margin-top: 18px;
+  padding: 20px 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg, 12px);
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(16, 36, 26, 0.04);
+}
+.ai-handout-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-handout-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.ai-handout-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0c9a6b;
+  background: rgba(12, 154, 107, 0.1);
+  border: 1px solid rgba(12, 154, 107, 0.25);
+}
+.ai-handout-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ai-handout-subtitle code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  background: #f0f4f1;
+  color: #244633;
+}
+.ai-handout-env-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 7px 13px;
+  flex-shrink: 0;
+}
+.ai-handout-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.ai-handout-card {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+}
+.ai-handout-card:hover {
+  border-color: #8ebb9e;
+  background: #ffffff;
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 12px -2px rgba(16, 36, 26, 0.08);
+}
+.ai-handout-card.is-active {
+  border-color: #0c9a6b;
+  background: #f4faf6;
+  box-shadow: 0 0 0 2px rgba(12, 154, 107, 0.2);
+}
+.ai-handout-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ai-handout-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ai-handout-card-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #2c6e49;
+  background: rgba(44, 110, 73, 0.1);
+}
+.ai-handout-card-model {
+  display: block;
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  color: #1a5336;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.ai-handout-card-notes {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  flex-grow: 1;
+}
+.ai-handout-card-action {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #0c9a6b;
+  transition: color 0.15s ease;
+}
+.ai-handout-card:hover .ai-handout-card-action {
+  color: #086e4c;
+}
+.ai-handout-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.ai-handout-guide-box {
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f7f9f7;
+  border: 1px solid #e7ede8;
+}
+.ai-handout-guide-box strong {
+  display: block;
+  font-size: 12.5px;
+  color: #284435;
+  margin-bottom: 4px;
+}
+.ai-handout-guide-box p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ai-handout-guide-box code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: #e9efe9;
+  color: #244633;
+}
+@media (max-width: 900px) {
+  .ai-handout-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .ai-handout-grid { grid-template-columns: 1fr; }
+  .ai-handout-guide-grid { grid-template-columns: 1fr; }
+  .ai-handout-heading { flex-direction: column; align-items: stretch; }
+  .ai-handout-env-btn { width: 100%; justify-content: center; }
+}
+
 @media (max-width: 560px) {
   .research-error-card { align-items: stretch; flex-direction: column; gap: 10px; }
   .research-error-card button { width: 100%; min-height: 40px; text-align: center; justify-content: center; }
