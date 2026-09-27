@@ -86,6 +86,7 @@ export type BacktestResult = {
   barsTested: number;
   equity: Array<{ time: number; value: number; benchmarkValue: number }>;
   trades: CompletedTrade[];
+  candles?: Candle[];
   validation: {
     splitAt: number;
     inSample: BacktestPeriodSummary;

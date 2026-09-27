@@ -403,6 +403,7 @@ export type ReplayTargetTrade = {
   side: "buy" | "sell";
   origin: "paper" | "backtests";
   strategyLabel?: string;
+  candles?: Candle[];
 };
 
 function PriceChart({
@@ -508,9 +509,9 @@ function PriceChart({
   }, [visibleBars, candles.length]);
 
   const chartData = useMemo(() => {
-    if (!candles || candles.length < 2) return null;
+    if (!candles || candles.length < 1) return null;
 
-    const clampedVisible = Math.max(15, Math.min(visibleBars, candles.length));
+    const clampedVisible = Math.max(1, Math.min(visibleBars, candles.length));
     const maxPan = Math.max(0, candles.length - clampedVisible);
     const clampedPan = Math.max(0, Math.min(panOffset, maxPan));
 
@@ -518,7 +519,7 @@ function PriceChart({
     const startIdx = Math.max(0, endIdx - clampedVisible);
     const rows = candles.slice(startIdx, endIdx);
 
-    if (rows.length < 2) return null;
+    if (rows.length < 1) return null;
 
     const highs = rows.map((c) => c.high);
     const lows = rows.map((c) => c.low);
@@ -534,8 +535,8 @@ function PriceChart({
     const usableHeight = height - padTop - padBottom;
     const spread = maxHigh - minLow || maxHigh * 0.01 || 1;
 
-    const barWidth = plotWidth / rows.length;
-    const bodyWidth = Math.max(2.5, Math.min(9.5, barWidth * 0.7));
+    const barWidth = plotWidth / Math.max(1, rows.length);
+    const bodyWidth = Math.max(2.5, Math.min(14, barWidth * 0.7));
 
     const maxVolume = Math.max(...rows.map((c) => c.volume)) || 1;
     const volAreaHeight = 36;
@@ -696,7 +697,7 @@ function PriceChart({
       resistanceY,
       maxVolume,
       volAreaHeight,
-      positive: rows.at(-1)!.close >= rows[0].open,
+      positive: (rows.at(-1)?.close ?? 0) >= (rows[0]?.open ?? 0),
     };
   }, [candles, height, showVolume, indicators, visibleBars, panOffset]);
 
@@ -1926,20 +1927,42 @@ export default function TradingDesk() {
   const [replayTicketSlPct, setReplayTicketSlPct] = useState<number>(1.0);
   const [replayTargetTrade, setReplayTargetTrade] = useState<ReplayTargetTrade | null>(null);
 
+  // Effective market dataset: uses replayTargetTrade.candles if replaying a specific historical trade, otherwise live market
+  const effectiveMarket = useMemo<MarketData | null>(() => {
+    if (view === "replay" && replayTargetTrade?.candles && replayTargetTrade.candles.length > 0) {
+      const c = replayTargetTrade.candles;
+      const last = c[c.length - 1];
+      return {
+        symbol: replayTargetTrade.symbol,
+        category: "SPOT" as const,
+        interval: replayTargetTrade.interval ?? interval,
+        price: last.close,
+        change24h: 0,
+        high24h: c.reduce((max, bar) => (bar.high > max ? bar.high : max), -Infinity),
+        low24h: c.reduce((min, bar) => (bar.low < min ? bar.low : min), Infinity),
+        volume24h: c.reduce((sum, bar) => sum + bar.volume, 0),
+        turnover24h: c.reduce((sum, bar) => sum + bar.turnover, 0),
+        asOf: last.time,
+        candles: c,
+      };
+    }
+    return market;
+  }, [view, replayTargetTrade, market, interval]);
+
   // Clamped market data for zero-hindsight simulation
   const activeMarket = useMemo(() => {
-    if (!market) return null;
-    if (!isReplayActive) return market;
-    const clampedIndex = Math.max(0, Math.min(market.candles.length - 1, replayIndex));
-    const sliced = market.candles.slice(0, clampedIndex + 1);
-    const lastBar = sliced[sliced.length - 1] ?? market.candles[0];
+    if (!effectiveMarket) return null;
+    if (!isReplayActive) return effectiveMarket;
+    const clampedIndex = Math.max(0, Math.min(effectiveMarket.candles.length - 1, replayIndex));
+    const sliced = effectiveMarket.candles.slice(0, clampedIndex + 1);
+    const lastBar = sliced[sliced.length - 1] ?? effectiveMarket.candles[0];
     return {
-      ...market,
+      ...effectiveMarket,
       price: lastBar.close,
       asOf: lastBar.time,
       candles: sliced,
     };
-  }, [market, isReplayActive, replayIndex]);
+  }, [effectiveMarket, isReplayActive, replayIndex]);
 
   const liveIndicators = useMemo(() => activeMarket ? getIndicatorSnapshot(activeMarket) : null, [activeMarket]);
   const [refreshCount, setRefreshCount] = useState(0);
@@ -2228,7 +2251,12 @@ export default function TradingDesk() {
       setMarketError("");
       setMarket(null);
       try {
-        const response = await fetch(`/api/market?symbol=${symbol}&interval=${interval}`, { cache: "no-store" });
+        const queryParams = new URLSearchParams({
+          symbol,
+          interval,
+          limit: view === "replay" ? "1000" : "300",
+        });
+        const response = await fetch(`/api/market?${queryParams.toString()}`, { cache: "no-store" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Market data could not be loaded.");
         if (current) setMarket(payload.market as MarketData);
@@ -3377,24 +3405,24 @@ export default function TradingDesk() {
 
   // Current visible replay candle
   const currentReplayCandle = useMemo(() => {
-    if (!market || !market.candles || market.candles.length === 0) return null;
-    const clamped = Math.max(0, Math.min(market.candles.length - 1, replayIndex));
-    return market.candles[clamped] ?? null;
-  }, [market, replayIndex]);
+    if (!effectiveMarket || !effectiveMarket.candles || effectiveMarket.candles.length === 0) return null;
+    const clamped = Math.max(0, Math.min(effectiveMarket.candles.length - 1, replayIndex));
+    return effectiveMarket.candles[clamped] ?? null;
+  }, [effectiveMarket, replayIndex]);
 
   const handleRewindBars = useCallback((barsBack: number) => {
-    if (!market) return;
+    if (!effectiveMarket) return;
     setReplayIndex((prev) => Math.max(0, prev - barsBack));
     setIsReplayPlaying(false);
     setIsCutMode(false);
-  }, [market]);
+  }, [effectiveMarket]);
 
   const handleStepForward = useCallback(() => {
-    if (!market) return;
+    if (!effectiveMarket) return;
     setReplayIndex((prev) => {
-      if (prev >= market.candles.length - 1) return prev;
+      if (prev >= effectiveMarket.candles.length - 1) return prev;
       const nextIdx = prev + 1;
-      const nextCandle = market.candles[nextIdx];
+      const nextCandle = effectiveMarket.candles[nextIdx];
       if (nextCandle) {
         setReplayWallet((w) => {
           const res = advanceReplayCandle(w, nextCandle);
@@ -3406,15 +3434,15 @@ export default function TradingDesk() {
       }
       return nextIdx;
     });
-  }, [market]);
+  }, [effectiveMarket]);
 
   const handleScrubIndex = useCallback((index: number) => {
-    if (!market) return;
-    const clamped = Math.max(0, Math.min(market.candles.length - 1, index));
+    if (!effectiveMarket) return;
+    const clamped = Math.max(0, Math.min(effectiveMarket.candles.length - 1, index));
     setReplayIndex(clamped);
     setIsReplayPlaying(false);
     setIsCutMode(false);
-  }, [market]);
+  }, [effectiveMarket]);
 
   const handleReplayQuickBuy = useCallback((amountUsd = 250) => {
     if (!currentReplayCandle) return;
@@ -3513,11 +3541,11 @@ export default function TradingDesk() {
   }, [replayTargetTrade]);
 
   const handleJumpToSetup = useCallback(() => {
-    if (!market || !replayTargetTrade) return;
+    if (!effectiveMarket || !replayTargetTrade) return;
     let closestIdx = 0;
     let minDiff = Infinity;
-    for (let i = 0; i < market.candles.length; i++) {
-      const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+    for (let i = 0; i < effectiveMarket.candles.length; i++) {
+      const diff = Math.abs(effectiveMarket.candles[i].time - replayTargetTrade.openedAt);
       if (diff < minDiff) {
         minDiff = diff;
         closestIdx = i;
@@ -3527,14 +3555,14 @@ export default function TradingDesk() {
     setReplayIndex(setupIdx);
     setIsReplayPlaying(false);
     setToastMessage("Jumped to setup window (25 bars prior to entry)");
-  }, [market, replayTargetTrade]);
+  }, [effectiveMarket, replayTargetTrade]);
 
   const handleJumpToEntry = useCallback(() => {
-    if (!market || !replayTargetTrade) return;
+    if (!effectiveMarket || !replayTargetTrade) return;
     let closestIdx = 0;
     let minDiff = Infinity;
-    for (let i = 0; i < market.candles.length; i++) {
-      const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+    for (let i = 0; i < effectiveMarket.candles.length; i++) {
+      const diff = Math.abs(effectiveMarket.candles[i].time - replayTargetTrade.openedAt);
       if (diff < minDiff) {
         minDiff = diff;
         closestIdx = i;
@@ -3543,14 +3571,14 @@ export default function TradingDesk() {
     setReplayIndex(closestIdx);
     setIsReplayPlaying(false);
     setToastMessage("Jumped to trade entry bar");
-  }, [market, replayTargetTrade]);
+  }, [effectiveMarket, replayTargetTrade]);
 
   const handleJumpToExit = useCallback(() => {
-    if (!market || !replayTargetTrade) return;
+    if (!effectiveMarket || !replayTargetTrade) return;
     let closestIdx = 0;
     let minDiff = Infinity;
-    for (let i = 0; i < market.candles.length; i++) {
-      const diff = Math.abs(market.candles[i].time - replayTargetTrade.closedAt);
+    for (let i = 0; i < effectiveMarket.candles.length; i++) {
+      const diff = Math.abs(effectiveMarket.candles[i].time - replayTargetTrade.closedAt);
       if (diff < minDiff) {
         minDiff = diff;
         closestIdx = i;
@@ -3559,7 +3587,7 @@ export default function TradingDesk() {
     setReplayIndex(closestIdx);
     setIsReplayPlaying(false);
     setToastMessage("Jumped to trade exit bar");
-  }, [market, replayTargetTrade]);
+  }, [effectiveMarket, replayTargetTrade]);
 
   const replayFromPaperTrade = useCallback((trade: ClosedPaperTrade) => {
     const target: ReplayTargetTrade = {
@@ -3586,7 +3614,7 @@ export default function TradingDesk() {
     setToastMessage(`Loaded paper trade review for ${trade.symbol}`);
   }, [interval, symbol]);
 
-  const replayFromBacktestTrade = useCallback((trade: CompletedTrade, testSymbol: string, testInterval: string, strategyPromptText?: string) => {
+  const replayFromBacktestTrade = useCallback((trade: CompletedTrade, testSymbol: string, testInterval: string, strategyPromptText?: string, backtestCandles?: Candle[]) => {
     const target: ReplayTargetTrade = {
       id: `backtest-${trade.entryAt}-${trade.exitAt}`,
       symbol: testSymbol,
@@ -3600,6 +3628,7 @@ export default function TradingDesk() {
       side: "buy",
       origin: "backtests",
       strategyLabel: strategyPromptText ? (strategyPromptText.length > 50 ? strategyPromptText.slice(0, 48) + "…" : strategyPromptText) : "Quantitative Backtest Rule",
+      candles: backtestCandles,
     };
     setReplayTargetTrade(target);
     if (symbol !== testSymbol) {
@@ -3747,12 +3776,12 @@ export default function TradingDesk() {
 
   // Initialize replay starting index when entering replay tab or loading a target trade
   useEffect(() => {
-    if (view === "replay" && market?.candles?.length) {
-      if (replayTargetTrade && market.symbol === replayTargetTrade.symbol) {
+    if (view === "replay" && effectiveMarket?.candles?.length) {
+      if (replayTargetTrade && effectiveMarket.symbol === replayTargetTrade.symbol) {
         let closestIdx = 0;
         let minDiff = Infinity;
-        for (let i = 0; i < market.candles.length; i++) {
-          const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+        for (let i = 0; i < effectiveMarket.candles.length; i++) {
+          const diff = Math.abs(effectiveMarket.candles[i].time - replayTargetTrade.openedAt);
           if (diff < minDiff) {
             minDiff = diff;
             closestIdx = i;
@@ -3761,10 +3790,10 @@ export default function TradingDesk() {
         const setupIdx = Math.max(0, closestIdx - 25);
         setReplayIndex(setupIdx);
       } else if (replayIndex === 0) {
-        setReplayIndex(Math.max(0, market.candles.length - 25));
+        setReplayIndex(Math.max(0, effectiveMarket.candles.length - 25));
       }
     }
-  }, [view, market?.candles?.length, market?.symbol, replayTargetTrade?.id]);
+  }, [view, effectiveMarket?.candles?.length, effectiveMarket?.symbol, replayTargetTrade?.id]);
 
   // Pause playback and clear cut mode when switching views
   useEffect(() => {
@@ -3776,17 +3805,17 @@ export default function TradingDesk() {
 
   // Replay playback timer
   useEffect(() => {
-    if (!isReplayActive || !isReplayPlaying || !market) return;
+    if (!isReplayActive || !isReplayPlaying || !effectiveMarket) return;
     const intervalMs = Math.max(100, Math.round(1000 / replaySpeed));
     const timer = window.setInterval(() => {
       setReplayIndex((prev) => {
-        if (prev >= market.candles.length - 1) {
+        if (prev >= effectiveMarket.candles.length - 1) {
           setIsReplayPlaying(false);
           setToastMessage("Replay reached the end of history.");
           return prev;
         }
         const nextIdx = prev + 1;
-        const nextCandle = market.candles[nextIdx];
+        const nextCandle = effectiveMarket.candles[nextIdx];
         if (nextCandle) {
           setReplayWallet((w) => {
             const res = advanceReplayCandle(w, nextCandle);
@@ -3801,7 +3830,7 @@ export default function TradingDesk() {
     }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [isReplayActive, isReplayPlaying, replaySpeed, market]);
+  }, [isReplayActive, isReplayPlaying, replaySpeed, effectiveMarket]);
 
   // Replay keyboard shortcuts
   useEffect(() => {
@@ -3836,12 +3865,12 @@ export default function TradingDesk() {
   }, [isReplayActive, isCutMode, scorecardModalOpen, handleStepForward]);
 
   const chartCandles = useMemo(() => {
-    if (!market || !market.candles) return [];
+    if (!effectiveMarket || !effectiveMarket.candles) return [];
     if (isReplayActive && !isCutMode && activeMarket) {
       return activeMarket.candles;
     }
-    return market.candles;
-  }, [market, isReplayActive, isCutMode, activeMarket]);
+    return effectiveMarket.candles;
+  }, [effectiveMarket, isReplayActive, isCutMode, activeMarket]);
 
   const copilotMarketSnapshot: MarketContextSnapshot | undefined = useMemo(() => {
     const targetMarket = activeMarket;
@@ -5378,7 +5407,7 @@ export default function TradingDesk() {
                             <button
                               type="button"
                               className="button button-secondary highlight-replay-btn"
-                              onClick={() => replayFromBacktestTrade(bestTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                              onClick={() => replayFromBacktestTrade(bestTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt, backtest.candles)}
                               title="Replay this best trade bar-by-bar in Trade Replay Studio"
                             >
                               <Icon name="replay" size={13} />
@@ -5408,7 +5437,7 @@ export default function TradingDesk() {
                             <button
                               type="button"
                               className="button button-secondary highlight-replay-btn"
-                              onClick={() => replayFromBacktestTrade(worstTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                              onClick={() => replayFromBacktestTrade(worstTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt, backtest.candles)}
                               title="Inspect what broke during this drawdown trade in Trade Replay Studio"
                             >
                               <Icon name="replay" size={13} />
@@ -5512,7 +5541,7 @@ export default function TradingDesk() {
                                     <button
                                       type="button"
                                       className="backtest-replay-row-btn"
-                                      onClick={() => replayFromBacktestTrade(trade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                                      onClick={() => replayFromBacktestTrade(trade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt, backtest.candles)}
                                       title="Replay this simulated trade on chart"
                                     >
                                       <Icon name="replay" size={12} />
@@ -5791,7 +5820,7 @@ export default function TradingDesk() {
                       <div>
                         <h2 id="replay-chart-heading">Historical Candlestick Action</h2>
                         <p className="replay-chart-subtitle">
-                          {symbol} · {interval} · Bar {replayIndex + 1} of {market?.candles.length ?? 0}
+                          {symbol} · {interval} · Bar {replayIndex + 1} of {effectiveMarket?.candles.length ?? 0}
                           {isCutMode ? " · [CUT MODE: click candle to rewind]" : ""}
                         </p>
                       </div>
@@ -5809,7 +5838,7 @@ export default function TradingDesk() {
                       </div>
                     </div>
 
-                    {market ? (
+                    {effectiveMarket ? (
                       <PriceChart
                         height={380}
                         candles={chartCandles}
@@ -5828,8 +5857,8 @@ export default function TradingDesk() {
                           label: replayTargetTrade.origin === "paper" ? "Paper Trade" : "Backtest Trade",
                         } : null}
                         onCutCandle={(candle) => {
-                          if (!market) return;
-                          const idx = market.candles.findIndex((c) => c.time === candle.time);
+                          if (!effectiveMarket) return;
+                          const idx = effectiveMarket.candles.findIndex((c) => c.time === candle.time);
                           if (idx !== -1) {
                             setReplayIndex(idx);
                             setIsCutMode(false);
@@ -5851,13 +5880,13 @@ export default function TradingDesk() {
                     )}
 
                     {/* Docked Institutional Light Studio Transport Console */}
-                    {market && (
+                    {effectiveMarket && (
                       <div className="replay-transport-dock" role="region" aria-label="Replay Playback Console">
                         {/* Timeline Scrubber */}
                         <div className="replay-dock-timeline">
                           <div className="replay-dock-timeline-labels">
                             <span className="timeline-bar-count">
-                              Bar <strong>{replayIndex + 1}</strong> of <strong>{market.candles.length}</strong>
+                              Bar <strong>{replayIndex + 1}</strong> of <strong>{effectiveMarket.candles.length}</strong>
                             </span>
                             <span className="timeline-date-stamp">
                               {currentReplayCandle ? formatDate(currentReplayCandle.time, false) : "--"}
@@ -5866,8 +5895,8 @@ export default function TradingDesk() {
                           <input
                             type="range"
                             min={0}
-                            max={Math.max(0, market.candles.length - 1)}
-                            value={Math.max(0, Math.min(market.candles.length - 1, replayIndex))}
+                            max={Math.max(0, effectiveMarket.candles.length - 1)}
+                            value={Math.max(0, Math.min(effectiveMarket.candles.length - 1, replayIndex))}
                             onChange={(e) => handleScrubIndex(Number(e.target.value))}
                             className="replay-dock-scrubber"
                             aria-label="Replay timeline scrubber"
@@ -5905,7 +5934,18 @@ export default function TradingDesk() {
                               title={isReplayPlaying ? "Pause simulation playback (Space)" : "Start simulation playback (Space)"}
                               aria-pressed={isReplayPlaying}
                             >
-                              <span className="playback-glyph">{isReplayPlaying ? "Pause" : "Play"}</span>
+                              <span className="playback-glyph" aria-hidden="true">
+                                {isReplayPlaying ? (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="5" y="4" width="4" height="16" rx="1" />
+                                    <rect x="15" y="4" width="4" height="16" rx="1" />
+                                  </svg>
+                                ) : (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M6 4.75v14.5a.75.75 0 0 0 1.15.64l12-7.25a.75.75 0 0 0 0-1.28l-12-7.25A.75.75 0 0 0 6 4.75z" />
+                                  </svg>
+                                )}
+                              </span>
                               <span className="playback-label">{isReplayPlaying ? "Pause" : "Play"}</span>
                               <kbd className="playback-kbd">Space</kbd>
                             </button>
@@ -5914,10 +5954,10 @@ export default function TradingDesk() {
                               type="button"
                               className="replay-dock-step-btn"
                               onClick={handleStepForward}
-                              disabled={replayIndex >= market.candles.length - 1}
+                              disabled={replayIndex >= effectiveMarket.candles.length - 1}
                               title="Advance 1 candle forward (→ or F)"
                             >
-                              <span>Step 1 Bar ▶|</span>
+                              <span>Step 1 Bar</span>
                               <kbd className="playback-kbd">→</kbd>
                             </button>
                           </div>

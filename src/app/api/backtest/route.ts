@@ -182,6 +182,7 @@ function compileDeterministicFallback(prompt: string): { model: string; result: 
     const result = runBacktestSimulation(symbol, interval, candles, strategy, costs);
     return NextResponse.json({ result: {
       ...result,
+      candles,
       model: completion.model,
       dataSource: "Bitget historical spot candles",
       spreadSource: observedSpread === null ? "fallback" : "current-order-book",
