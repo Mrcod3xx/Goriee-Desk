@@ -484,4 +484,24 @@ All 13 keys above are covered by the workspace backup allowlist in `src/lib/work
     - Unit test suite: **37/37 pass** (`npm run test:unit`).
     - TypeScript: **0 errors** (`npx tsc --noEmit`).
 
+---
+
+## 🎬 21. Trade Replay Review Overlay — Entry / Stop Loss / Take Profit (Sprint 21 - September 27, 2026)
+
+- **Problem:** Clicking **Trade Replay** on a backtested or closed paper trade dropped the user into a bare tape. Nothing on the chart said *where* the position entered, *where* the Stop Loss and Take Profit sat, or *where* it finally left, and there was no readout of entry/exit price, P&L, or whether TP or SL was hit.
+- **Solution — spoiler-free phased review overlay** (new pure, deterministic module `src/lib/replay-review.ts`):
+  - `resolveReplayReviewPhase()` derives `pre-entry` / `in-trade` / `closed` from the playhead versus the reviewed trade's bars, so the chart only ever reveals what the tape has actually reached (no hindsight).
+  - **pre-entry:** nothing is drawn; details read `Awaiting fill`.
+  - **in-trade:** entry line + pin + `ENTRY $…` caption, dashed Take Profit / Stop Loss lines with captions, reward/risk corridors that fill from entry toward the playhead, the realised price trajectory, an `OPEN` live pin, and price-rail tags; the Trade Details card shows the recorded bracket, planned R:R and a floating Open P/L.
+  - **closed:** exit event line, win/loss-toned exit pin, `EXIT $…` caption, hit emphasis on whichever level was touched (`TP HIT $…` / `STOP LOSS $…`), an outcome banner (`Take Profit hit`, `Stop Loss hit`, `Trailing stop hit`, `Exit signal fired`, `Closed at end of data`, `Closed manually`, `Exit reason not recorded`) plus realized P&L, R multiple and bars held.
+  - The timeline scrubber gains `ENTRY` / `EXIT` ticks so "when did it get in and out" is visible without scrubbing, and the HUD gains `Setup (-25b)` / `Entry Bar` / `Exit Bar` jump buttons.
+  - **Honesty invariant:** backtest trades carry no bracket, so TP/SL render `Not recorded` and the R multiple `Not derivable` — the overlay never invents levels. Paper trades hydrate their real bracket from the `bracketSnapshot` stored on the closing fill.
+- **Files touched:** new `src/lib/replay-review.ts`; `src/components/trading-desk.tsx` (review HUD, SVG overlay layer, Trade Details card, scrubber ticks, desk memos); `src/app/globals.css` (review overlay styles); `src/lib/backtest.ts` (`CompletedTrade.exitReason`); `test/unit.test.mjs` (+4 tests).
+- **Verification:** `npm run typecheck` 0 errors; `npm run test:unit` **43/43 pass**; new headless-Chrome suite `node test/verify-replay-review-overlay.mjs` passes both scenarios (deterministic backtest review, plus a bracketed paper fixture seeded from live `/api/market` candles) and writes 7 screenshots to `test/screenshots/replay-review-*.png`.
+- **Gotchas worth remembering when asserting on this UI:**
+  1. Chrome algebraically re-serializes inline `calc()`: setting `left: calc(7.5px + 0.42 * (100% - 15px))` reads back as `calc(42% + 1.2px)`. Measure rendered geometry (`getBoundingClientRect`) instead of parsing `style.left`.
+  2. SVG nodes' `.className` is an `SVGAnimatedString`, which serializes to `{}` across the CDP boundary — always read `getAttribute("class")`.
+  3. Reward/risk corridors span entry → playhead, so they intentionally have zero width (and are not drawn) on the entry bar itself; they grow as the tape advances.
+- Dev server left running on `http://localhost:3000` (handover rule: do not terminate it).
+
 

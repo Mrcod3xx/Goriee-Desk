@@ -40,6 +40,12 @@ export type CompletedTrade = {
   pnl: number;
   returnPct: number;
   barsHeld: number;
+  /**
+   * Why the simulation left the market. The rule engine has no bracket orders,
+   * so the only honest answers are "the exit rule fired" or "the tape ended
+   * while the position was still open". Never reported as a take-profit/stop.
+   */
+  exitReason?: "signal" | "end_of_data";
 };
 
 export type BacktestCosts = {
@@ -316,6 +322,7 @@ export function runBacktestSimulation(
         pnl,
         returnPct: (pnl / committedCapital) * 100,
         barsHeld: index - entryIndex,
+        exitReason: "signal",
       });
       cash = proceeds;
       units = 0;
@@ -345,6 +352,7 @@ export function runBacktestSimulation(
       pnl,
       returnPct: (pnl / committedCapital) * 100,
       barsHeld: candles.length - 1 - entryIndex,
+      exitReason: "end_of_data",
     });
     cash = proceeds;
     units = 0;

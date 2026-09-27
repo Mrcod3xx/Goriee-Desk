@@ -12962,102 +12962,562 @@ html, body {
   font-weight: 650;
 }
 
-/* Price Chart Target Trade Review Corridor & Lines */
+/* ==========================================================================
+   TRADE REPLAY - REVIEWED TRADE: PROGRESSIVE ENTRY / SL / TP OVERLAY
+   Levels appear only once the tape has actually reached them: nothing before
+   the entry bar, the full bracket while the position is open, and the exit
+   level/pin only on the closing bar (no hindsight leakage).
+   ========================================================================== */
+
 .chart-target-trade-layer {
   pointer-events: none;
 }
 
-.target-trade-corridor.is-win {
-  fill: rgba(12, 154, 107, 0.08);
+/* Reward (entry -> TP) and risk (entry -> SL) corridors. They fill only as far
+   as the tape has travelled, so the zones visibly grow while the trade runs. */
+.target-trade-corridor {
+  stroke: none;
 }
 
-.target-trade-corridor.is-loss {
-  fill: rgba(220, 38, 38, 0.08);
+.target-trade-corridor.corridor-reward {
+  fill: rgba(12, 154, 107, 0.1);
 }
 
+.target-trade-corridor.corridor-risk {
+  fill: rgba(220, 38, 38, 0.1);
+}
+
+.target-trade-corridor.corridor-reward.is-hit {
+  fill: rgba(12, 154, 107, 0.17);
+}
+
+.target-trade-corridor.corridor-risk.is-hit {
+  fill: rgba(220, 38, 38, 0.17);
+}
+
+/* Close-price path the reviewed trade actually took, revealed bar by bar. */
+.target-trade-trajectory {
+  fill: none;
+  stroke: #475569;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+
+/* Vertical event lines answer "when did it get in / get out". */
+.target-trade-event-line {
+  stroke-width: 1.2;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.target-trade-event-line.event-entry {
+  stroke: #2563eb;
+}
+
+.target-trade-event-line.event-exit {
+  stroke: #7c3aed;
+}
+
+/* Horizontal price levels for the reviewed trade. */
 .target-trade-line-entry {
   stroke: #2563eb;
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
-  opacity: 0.85;
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
+}
+
+.target-trade-line-tp {
+  stroke: #0c9a6b;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  opacity: 0.7;
+}
+
+.target-trade-line-sl {
+  stroke: #dc2626;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  opacity: 0.7;
+}
+
+.target-trade-line-tp.is-hit,
+.target-trade-line-sl.is-hit {
+  stroke-width: 2.2;
+  stroke-dasharray: none;
+  opacity: 1;
 }
 
 .target-trade-line-exit {
   stroke: #7c3aed;
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
-  opacity: 0.85;
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
 }
 
-/* Right Rail Target Trade Badges */
-.rail-tag-target-entry {
-  position: absolute;
-  right: 6px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  z-index: 12;
-  pointer-events: none;
+.target-trade-line-exit.is-hit {
+  stroke-width: 2.2;
+  opacity: 1;
 }
 
-.target-tag-bg-entry {
+/* Event pins. The open-position pin reuses the live pulse animation. */
+.target-trade-pin {
+  stroke-width: 2;
+}
+
+.target-trade-pin.pin-entry {
+  fill: #ffffff;
+  stroke: #2563eb;
+}
+
+.target-trade-pin.pin-live {
+  fill: #ffffff;
+  stroke: #0c9a6b;
+  animation: pulseLivePin 1.6s ease-in-out infinite;
+}
+
+.target-trade-pin.pin-exit {
+  fill: #ffffff;
+  stroke: #7c3aed;
+}
+
+.target-trade-pin.pin-exit.is-win {
+  fill: #0c9a6b;
+  stroke: #ffffff;
+}
+
+.target-trade-pin.pin-exit.is-loss {
+  fill: #dc2626;
+  stroke: #ffffff;
+}
+
+/* On-chart captions. The white halo (paint-order stroke) keeps the labels
+   readable over candles, grid lines and corridors on the white chart. */
+.target-trade-caption {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.target-trade-caption.caption-entry {
+  fill: #1d4ed8;
+}
+
+.target-trade-caption.caption-tp {
+  fill: #047857;
+}
+
+.target-trade-caption.caption-tp.is-hit {
+  fill: #065f46;
+  font-weight: 850;
+}
+
+.target-trade-caption.caption-sl {
+  fill: #dc2626;
+}
+
+.target-trade-caption.caption-sl.is-hit {
+  fill: #b91c1c;
+  font-weight: 850;
+}
+
+.target-trade-caption.caption-live {
+  fill: #0f766e;
+}
+
+.target-trade-caption.caption-exit {
+  fill: #6d28d9;
+}
+
+.target-trade-caption.caption-exit.is-win {
+  fill: #047857;
+}
+
+.target-trade-caption.caption-exit.is-loss {
+  fill: #b91c1c;
+}
+
+/* --------------------------------------------------------------------------
+   Right-rail review tags
+   Dark chips keep parity with the existing bracket pills and stay WCAG AA
+   (near-white text on saturated dark backgrounds). Rendered independently of
+   the live bracket preview so both can coexist on the rail.
+   -------------------------------------------------------------------------- */
+.rail-tag-review {
+  z-index: 14;
+}
+
+.review-tag-bg-entry,
+.review-tag-bg-tp,
+.review-tag-bg-sl,
+.review-tag-bg-win,
+.review-tag-bg-loss {
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+}
+
+.review-tag-bg-entry {
   background: #1e3a8a;
   color: #eff6ff;
   border: 1px solid #3b82f6;
-  border-radius: 4px;
-  padding: 2px 5px;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
-  line-height: 1.15;
 }
 
-.notch-target-entry {
-  color: #3b82f6;
-  font-size: 8px;
-  margin-right: -1px;
+.review-tag-bg-tp {
+  background: #064e3b;
+  color: #ecfdf5;
+  border: 1px solid #059669;
 }
 
-.rail-tag-target-exit {
-  position: absolute;
-  right: 6px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  z-index: 12;
-  pointer-events: none;
+.review-tag-bg-sl {
+  background: #7f1d1d;
+  color: #fef2f2;
+  border: 1px solid #dc2626;
 }
 
-.target-tag-bg-win {
+.review-tag-bg-win {
   background: #064e3b;
   color: #ecfdf5;
   border: 1px solid #10b981;
-  border-radius: 4px;
-  padding: 2px 5px;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
-  line-height: 1.15;
 }
 
-.target-tag-bg-loss {
+.review-tag-bg-loss {
   background: #7f1d1d;
   color: #fef2f2;
   border: 1px solid #ef4444;
-  border-radius: 4px;
-  padding: 2px 5px;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
-  line-height: 1.15;
 }
 
-.notch-target-exit {
-  color: #8b5cf6;
-  font-size: 8px;
-  margin-right: -1px;
+.notch-review.notch-entry {
+  color: #3b82f6;
+}
+
+.notch-review.notch-tp {
+  color: #059669;
+}
+
+.notch-review.notch-sl {
+  color: #dc2626;
+}
+
+.notch-review.notch-win {
+  color: #10b981;
+}
+
+.notch-review.notch-loss {
+  color: #ef4444;
+}
+
+.rail-tag-review.is-hit .rail-chevron-body {
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3), 0 1px 4px rgba(15, 23, 42, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   HUD phase badge & spoiler-free metrics
+   Tells the viewer whether the tape is before the fill, inside the open
+   position, or past the close. Shared with the Trade Details card badge.
+   -------------------------------------------------------------------------- */
+.replay-review-phase,
+.review-phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.replay-review-phase::before,
+.review-phase-badge::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.phase-pre-entry {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.phase-in-trade {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
+}
+
+.phase-in-trade::before {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.phase-closed {
+  background: #e3f4ec;
+  color: #065f46;
+  border-color: #a7d7c3;
+}
+
+.replay-review-metric.is-pending {
+  color: #557364;
+}
+
+.replay-review-metric.is-pending strong {
+  color: #3d5548;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   Timeline scrubber: ENTRY / EXIT ticks
+   The track wrapper anchors the ticks; the inline `left` uses
+   calc(7.5px + pct * (100% - 15px)) so each tick lines up with the centre of
+   the 15px scrubber thumb rather than the raw track percentage.
+   -------------------------------------------------------------------------- */
+.replay-dock-scrubber-track {
+  position: relative;
+  width: 100%;
+  margin-top: 18px; /* headroom for the floating tick labels */
+}
+
+.scrubber-marker {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scrubber-marker.marker-entry {
+  background: #2563eb;
+}
+
+.scrubber-marker.marker-exit {
+  background: #7c3aed;
+}
+
+.scrubber-marker-label {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.marker-entry .scrubber-marker-label {
+  color: #1d4ed8;
+}
+
+.marker-exit .scrubber-marker-label {
+  color: #6d28d9;
+}
+
+/* --------------------------------------------------------------------------
+   Reviewed Trade Details card
+   Phase-aware readout of the same levels drawn on the chart. Rows stay honest:
+   "Awaiting fill" before entry, "Not recorded" / "Not derivable" when the
+   source trade never carried a bracket or the maths is undefined.
+   -------------------------------------------------------------------------- */
+.review-outcome-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid;
+  border-radius: 10px;
+}
+
+.review-outcome-banner.is-win {
+  background: #e3f4ec;
+  border-color: #a7d7c3;
+}
+
+.review-outcome-banner.is-loss {
+  background: #fbefef;
+  border-color: #e5b8ba;
+}
+
+.review-outcome-label {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.review-outcome-banner.is-win .review-outcome-label {
+  color: #065f46;
+}
+
+.review-outcome-banner.is-loss .review-outcome-label {
+  color: #7f1d1d;
+}
+
+.review-outcome-pnl {
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-outcome-banner.is-win .review-outcome-pnl {
+  color: #047857;
+}
+
+.review-outcome-banner.is-loss .review-outcome-pnl {
+  color: #b91c1c;
+}
+
+.review-outcome-pct {
+  margin-left: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.review-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.review-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 11px;
+  background: var(--surface-soft, #f8faf8);
+  border: 1px solid var(--line, #e1e8e3);
+  border-left: 3px solid #94a3b8;
+  border-radius: 9px;
+}
+
+.review-detail-label {
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted, #4e6055);
+}
+
+.review-detail-value {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink, #172b24);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.review-detail-row.tone-entry {
+  border-left-color: #2563eb;
+}
+
+.review-detail-row.tone-tp {
+  border-left-color: #0c9a6b;
+}
+
+.review-detail-row.tone-tp .review-detail-value {
+  color: #047857;
+}
+
+.review-detail-row.tone-sl {
+  border-left-color: #dc2626;
+}
+
+.review-detail-row.tone-sl .review-detail-value {
+  color: #b91c1c;
+}
+
+.review-detail-row.tone-exit {
+  border-left-color: #7c3aed;
+}
+
+.review-detail-row.tone-exit .review-detail-value {
+  color: #6d28d9;
+}
+
+.review-detail-row.tone-neutral {
+  border-left-color: #94a3b8;
+}
+
+.review-detail-row.tone-muted {
+  border-left-color: #cbd5e1;
+}
+
+.review-detail-row.tone-muted .review-detail-value {
+  color: #475569;
+  font-weight: 600;
+}
+
+.review-detail-row.tone-pending {
+  border-left-color: #cbd5e1;
+  background: #f4f7f4;
+}
+
+.review-detail-row.tone-pending .review-detail-value {
+  color: #475569;
+  font-weight: 600;
+}
+
+.review-detail-row.tone-tp.is-hit {
+  background: #e3f4ec;
+  border-color: #a7d7c3;
+  border-left-color: #0c9a6b;
+}
+
+.review-detail-row.tone-tp.is-hit .review-detail-value {
+  color: #065f46;
+}
+
+.review-detail-row.tone-sl.is-hit {
+  background: #fbefef;
+  border-color: #e5b8ba;
+  border-left-color: #dc2626;
+}
+
+.review-detail-row.tone-sl.is-hit .review-detail-value {
+  color: #7f1d1d;
+}
+
+.review-hint {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #3d5548;
+}
+
+@media (max-width: 640px) {
+  .review-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-outcome-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 

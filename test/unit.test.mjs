@@ -1004,7 +1004,315 @@ test("Quantitative Backtest: validateStrategyDraft resiliently normalizes RSI an
   );
 });
 
+test("Trade Replay Review: paper exit-note classification and outcome precedence", async () => {
+  const {
+    classifyPaperExitNote,
+    resolveReplayReviewOutcome,
+    REPLAY_REVIEW_OUTCOME_LABELS,
+    REPLAY_REVIEW_PHASE_LABELS,
+  } = await import("../src/lib/replay-review.ts");
 
+  // 1. Each bracket engine prefix maps to exactly one outcome
+  assert.equal(classifyPaperExitNote("Take-Profit hit at $123.45"), "take_profit");
+  assert.equal(classifyPaperExitNote("Stop-Loss triggered at $90.00"), "stop_loss");
+  assert.equal(classifyPaperExitNote("Trailing stop hit at $95.00"), "trailing_stop");
+  assert.equal(classifyPaperExitNote("Rule Engine Exit: RSI crossed above 70"), "signal_exit");
 
+  // 2. Surrounding whitespace is tolerated (notes are user-editable)
+  assert.equal(classifyPaperExitNote("  Take-Profit hit at $123.45\n"), "take_profit");
 
+  // 3. Nothing is guessed: empty, missing or freeform notes stay unclassified
+  assert.equal(classifyPaperExitNote(null), null);
+  assert.equal(classifyPaperExitNote(undefined), null);
+  assert.equal(classifyPaperExitNote(""), null);
+  assert.equal(classifyPaperExitNote("   "), null);
+  assert.equal(classifyPaperExitNote("Closed by operator"), null);
+  assert.equal(classifyPaperExitNote("take-profit hit at $1"), null, "matching must be case exact");
+  assert.equal(classifyPaperExitNote("Hit the Take-Profit hit at  level"), null, "prefix only, not keyword search");
 
+  // 4. An explicitly recorded reason always beats the note fallback
+  assert.equal(resolveReplayReviewOutcome("take_profit", "Stop-Loss triggered at $90"), "take_profit");
+  assert.equal(resolveReplayReviewOutcome("manual", null), "manual");
+
+  // 5. Otherwise the note is used, and unattributable exits report "unknown"
+  assert.equal(resolveReplayReviewOutcome(null, "Stop-Loss triggered at $90"), "stop_loss");
+  assert.equal(resolveReplayReviewOutcome(undefined, "Trailing stop hit at $95"), "trailing_stop");
+  assert.equal(resolveReplayReviewOutcome(null, null), "unknown");
+  assert.equal(resolveReplayReviewOutcome(undefined, "operator closed it"), "unknown");
+
+  // 6. Every outcome and phase has a human readable label (no undefined in the UI)
+  for (const key of ["take_profit", "stop_loss", "trailing_stop", "signal_exit", "end_of_data", "manual", "unknown"]) {
+    assert.equal(typeof REPLAY_REVIEW_OUTCOME_LABELS[key], "string");
+    assert.ok(REPLAY_REVIEW_OUTCOME_LABELS[key].length > 0, `missing label for ${key}`);
+  }
+  assert.equal(REPLAY_REVIEW_OUTCOME_LABELS.unknown, "Exit reason not recorded");
+  assert.equal(REPLAY_REVIEW_PHASE_LABELS["pre-entry"], "Awaiting entry");
+  assert.equal(REPLAY_REVIEW_PHASE_LABELS["in-trade"], "Position open");
+  assert.equal(REPLAY_REVIEW_PHASE_LABELS.closed, "Trade closed");
+});
+
+test("Trade Replay Review: tape alignment (nearest bar) and scrubber timeline mapping", async () => {
+  const { findNearestBarIndex, barIndexToTimelinePct } = await import("../src/lib/replay-review.ts");
+
+  const HOUR = 3_600_000;
+  const base = 1_700_000_000_000;
+  const tape = Array.from({ length: 30 }, (_, i) => ({
+    time: base + i * HOUR,
+    open: 100 + i,
+    high: 101 + i,
+    low: 99 + i,
+    close: 100.5 + i,
+    volume: 10,
+  }));
+
+  // 1. Exact bar open times resolve to their own index
+  assert.equal(findNearestBarIndex(tape, tape[0].time), 0);
+  assert.equal(findNearestBarIndex(tape, tape[7].time), 7);
+  assert.equal(findNearestBarIndex(tape, tape[29].time), 29);
+
+  // 2. Paper fills are stamped with Date.now(), so mid-bar times snap to the
+  //    nearest bar rather than missing entirely
+  assert.equal(findNearestBarIndex(tape, tape[7].time + 1_000_000), 7, "before the midpoint stays on bar 7");
+  assert.equal(findNearestBarIndex(tape, tape[7].time + 3_000_000), 8, "past the midpoint rolls to bar 8");
+
+  // 3. An exact tie resolves to the earlier bar (deterministic, no drift)
+  assert.equal(findNearestBarIndex(tape, tape[7].time + HOUR / 2), 7);
+
+  // 4. Degenerate input never throws and never invents an index
+  assert.equal(findNearestBarIndex([], tape[3].time), null);
+  assert.equal(findNearestBarIndex(null, tape[3].time), null);
+  assert.equal(findNearestBarIndex(undefined, tape[3].time), null);
+  assert.equal(findNearestBarIndex(tape, null), null);
+  assert.equal(findNearestBarIndex(tape, Number.NaN), null);
+  assert.equal(findNearestBarIndex(tape, Number.POSITIVE_INFINITY), null);
+  assert.equal(findNearestBarIndex([tape[4]], base), 0, "single bar tape always resolves to 0");
+
+  // 5. Bar index -> scrubber percentage across the full track
+  assert.equal(barIndexToTimelinePct(0, 10), 0);
+  assert.equal(barIndexToTimelinePct(9, 10), 100);
+  assert.ok(Math.abs(barIndexToTimelinePct(4, 10) - 400 / 9) < 1e-9);
+
+  // 6. Out of range indices clamp instead of drawing ticks off the track
+  assert.equal(barIndexToTimelinePct(25, 10), 100);
+  assert.equal(barIndexToTimelinePct(-3, 10), 0);
+
+  // 7. Without a usable tape length there is no honest position to report
+  assert.equal(barIndexToTimelinePct(null, 10), null);
+  assert.equal(barIndexToTimelinePct(Number.NaN, 10), null);
+  assert.equal(barIndexToTimelinePct(5, 1), null);
+  assert.equal(barIndexToTimelinePct(5, 0), null);
+});
+
+test("Trade Replay Review: bracket maths for long and short trades (R multiple, R:R, bars held)", async () => {
+  const { resolveTargetTradeReview } = await import("../src/lib/replay-review.ts");
+
+  const HOUR = 3_600_000;
+  const base = 1_700_000_000_000;
+  const tape = Array.from({ length: 30 }, (_, i) => ({
+    time: base + i * HOUR,
+    open: 100 + i,
+    high: 101 + i,
+    low: 99 + i,
+    close: 100.5 + i,
+    volume: 10,
+  }));
+
+  // 1. LONG into a take profit: risk and reward are both positive by convention
+  const long = resolveTargetTradeReview({
+    openedAt: tape[5].time + 900_000,
+    closedAt: tape[12].time + 120_000,
+    entryPrice: 100,
+    exitPrice: 120,
+    side: "buy",
+    netPnl: 40,
+    returnPct: 20,
+    quantity: 2,
+    takeProfitPrice: 120,
+    stopLossPrice: 90,
+    outcome: "take_profit",
+  }, tape);
+
+  assert.equal(long.side, "buy");
+  assert.equal(long.hasBrackets, true);
+  assert.equal(long.takeProfitPrice, 120);
+  assert.equal(long.stopLossPrice, 90);
+  assert.equal(long.quantity, 2);
+  assert.equal(long.riskPerUnit, 10, "long risk = entry - stop");
+  assert.equal(long.rewardPerUnit, 20, "long reward = target - entry");
+  assert.equal(long.riskRewardRatio, 2);
+  assert.equal(long.rMultiple, 2, "closing at the target is exactly +2R");
+  assert.equal(long.outcome, "take_profit");
+  assert.equal(long.outcomeLabel, "Take Profit hit");
+  assert.equal(long.netPnl, 40);
+  assert.equal(long.returnPct, 20);
+
+  // 2. Both bars resolve on the tape, so entry/exit times snap to bar opens and
+  //    bars held is derived from indices rather than trusted from the payload
+  assert.equal(long.entryIndex, 5);
+  assert.equal(long.exitIndex, 12);
+  assert.equal(long.entryTime, tape[5].time);
+  assert.equal(long.exitTime, tape[12].time);
+  assert.equal(long.barsHeld, 7);
+
+  // 3. SHORT into a stop loss: the direction multiplier keeps risk positive and
+  //    the losing move negative, so the R multiple reads -1R not +1R
+  const short = resolveTargetTradeReview({
+    openedAt: tape[3].time,
+    closedAt: tape[9].time,
+    entryPrice: 100,
+    exitPrice: 110,
+    side: "sell",
+    netPnl: -20,
+    returnPct: -10,
+    quantity: 2,
+    takeProfitPrice: 80,
+    stopLossPrice: 110,
+    outcome: "stop_loss",
+  }, tape);
+
+  assert.equal(short.side, "sell");
+  assert.equal(short.riskPerUnit, 10, "short risk = (entry - stop) * -1 stays positive");
+  assert.equal(short.rewardPerUnit, 20, "short reward = (target - entry) * -1 stays positive");
+  assert.equal(short.riskRewardRatio, 2);
+  assert.equal(short.rMultiple, -1, "short stopped out one stop-distance away is -1R");
+  assert.ok(short.rMultiple < 0);
+  assert.equal(short.outcomeLabel, "Stop Loss hit");
+  assert.equal(short.barsHeld, 6);
+
+  // 4. A rule-engine backtest trade carries no bracket at all. The review must
+  //    say so instead of synthesising levels or an exit reason.
+  const bare = resolveTargetTradeReview({
+    openedAt: tape[2].time,
+    closedAt: tape[4].time,
+    entryPrice: 50,
+    exitPrice: 55,
+    side: "buy",
+    netPnl: 10,
+    returnPct: 10,
+  }, tape);
+
+  assert.equal(bare.hasBrackets, false);
+  assert.equal(bare.takeProfitPrice, null);
+  assert.equal(bare.stopLossPrice, null);
+  assert.equal(bare.quantity, null);
+  assert.equal(bare.riskPerUnit, null);
+  assert.equal(bare.rewardPerUnit, null);
+  assert.equal(bare.riskRewardRatio, null, "R:R is not derivable without a stop");
+  assert.equal(bare.rMultiple, null, "R multiple is not derivable without a stop");
+  assert.equal(bare.outcome, "unknown");
+  assert.equal(bare.outcomeLabel, "Exit reason not recorded");
+  assert.equal(bare.barsHeld, 2, "still derived from the resolved bar indices");
+
+  // 5. Without a tape the recorded bar count is the only honest fallback
+  const noTape = resolveTargetTradeReview({
+    openedAt: 5_000,
+    closedAt: 9_000,
+    entryPrice: 100,
+    exitPrice: 105,
+    side: "buy",
+    netPnl: 5,
+    returnPct: 5,
+    barsHeld: 4.4,
+  }, null);
+
+  assert.equal(noTape.entryIndex, null);
+  assert.equal(noTape.exitIndex, null);
+  assert.equal(noTape.entryTime, 5_000);
+  assert.equal(noTape.exitTime, 9_000);
+  assert.equal(noTape.barsHeld, 4, "fractional bar counts are rounded");
+
+  // 6. A nonsense fallback count is rejected rather than displayed
+  const badCount = resolveTargetTradeReview({
+    openedAt: 5_000,
+    closedAt: 9_000,
+    entryPrice: 100,
+    exitPrice: 105,
+    side: "buy",
+    netPnl: 5,
+    returnPct: 5,
+    barsHeld: -3,
+  }, null);
+  assert.equal(badCount.barsHeld, null);
+
+  // 7. Non-finite or non-positive bracket levels are discarded, not rendered
+  const dirty = resolveTargetTradeReview({
+    openedAt: tape[1].time,
+    closedAt: tape[6].time,
+    entryPrice: 100,
+    exitPrice: 99,
+    side: "sell",
+    netPnl: 2,
+    returnPct: 2,
+    quantity: Number.NaN,
+    takeProfitPrice: Number.POSITIVE_INFINITY,
+    stopLossPrice: 0,
+    exitNote: "Rule Engine Exit: EMA cross down",
+  }, tape);
+  assert.equal(dirty.quantity, null);
+  assert.equal(dirty.takeProfitPrice, null);
+  assert.equal(dirty.stopLossPrice, null);
+  assert.equal(dirty.hasBrackets, false);
+  assert.equal(dirty.outcome, "signal_exit", "legacy notes are still classified");
+});
+
+test("Trade Replay Review: spoiler-free phase reveal and floating P&L at the playhead", async () => {
+  const {
+    resolveReplayReviewPhase,
+    calculateReviewUnrealizedPnl,
+    calculateReviewUnrealizedPct,
+  } = await import("../src/lib/replay-review.ts");
+
+  const review = { entryTime: 1_000, exitTime: 2_000 };
+
+  // 1. Before the tape reaches the entry bar nothing may be revealed
+  assert.equal(resolveReplayReviewPhase(review, 999), "pre-entry");
+  assert.equal(resolveReplayReviewPhase(review, 0), "pre-entry");
+  assert.equal(resolveReplayReviewPhase(review, -5), "pre-entry");
+
+  // 2. The entry bar itself opens the position, so the bracket appears there
+  assert.equal(resolveReplayReviewPhase(review, 1_000), "in-trade");
+  assert.equal(resolveReplayReviewPhase(review, 1_500), "in-trade");
+  assert.equal(resolveReplayReviewPhase(review, 1_999), "in-trade");
+
+  // 3. The exit price and outcome land only on the closing bar
+  assert.equal(resolveReplayReviewPhase(review, 2_000), "closed");
+  assert.equal(resolveReplayReviewPhase(review, 5_000), "closed");
+
+  // 4. A missing playhead or entry stamp can never leak a later phase. Panning
+  //    the chart or using the cut tool exposes bars without advancing the clock,
+  //    which is exactly why the phase is driven by time and not by bar index.
+  assert.equal(resolveReplayReviewPhase(review, null), "pre-entry");
+  assert.equal(resolveReplayReviewPhase(review, undefined), "pre-entry");
+  assert.equal(resolveReplayReviewPhase(review, Number.NaN), "pre-entry");
+  assert.equal(resolveReplayReviewPhase({ entryTime: null, exitTime: null }, 5_000), "pre-entry");
+
+  // 5. A trade still open at the end of the tape never reports "closed"
+  assert.equal(resolveReplayReviewPhase({ entryTime: 1_000, exitTime: null }, 1_500), "in-trade");
+  assert.equal(resolveReplayReviewPhase({ entryTime: 1_000, exitTime: null }, 9_999), "in-trade");
+
+  // 6. Floating P&L while the position is open is direction aware
+  const long = { side: "buy", entryPrice: 100, quantity: 2 };
+  const short = { side: "sell", entryPrice: 100, quantity: 2 };
+  assert.equal(calculateReviewUnrealizedPnl(long, 110), 20);
+  assert.equal(calculateReviewUnrealizedPnl(long, 90), -20);
+  assert.equal(calculateReviewUnrealizedPnl(short, 90), 20);
+  assert.equal(calculateReviewUnrealizedPnl(short, 110), -20);
+  assert.equal(calculateReviewUnrealizedPct(long, 110), 10);
+  assert.equal(calculateReviewUnrealizedPct(long, 90), -10);
+  assert.equal(calculateReviewUnrealizedPct(short, 90), 10);
+  assert.equal(calculateReviewUnrealizedPct(short, 110), -10);
+
+  // 7. Without a recorded size there is no cash figure to show, only a percent
+  assert.equal(calculateReviewUnrealizedPnl({ side: "buy", entryPrice: 100, quantity: null }, 110), null);
+  assert.equal(calculateReviewUnrealizedPct({ side: "buy", entryPrice: 100 }, 110), 10);
+
+  // 8. An unusable mark price or entry never yields a fabricated number
+  assert.equal(calculateReviewUnrealizedPnl(long, null), null);
+  assert.equal(calculateReviewUnrealizedPnl(long, undefined), null);
+  assert.equal(calculateReviewUnrealizedPnl(long, 0), null);
+  assert.equal(calculateReviewUnrealizedPnl(long, Number.NaN), null);
+  assert.equal(calculateReviewUnrealizedPnl({ side: "buy", entryPrice: 0, quantity: 2 }, 110), null);
+  assert.equal(calculateReviewUnrealizedPct(long, null), null);
+  assert.equal(calculateReviewUnrealizedPct(long, -5), null);
+  assert.equal(calculateReviewUnrealizedPct({ side: "sell", entryPrice: 0 }, 110), null);
+});

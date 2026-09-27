@@ -33,6 +33,21 @@ import {
   calculateReplayScorecard,
 } from "@/lib/replay-engine";
 import type { ReplayWallet } from "@/types/replay";
+import {
+  REPLAY_REVIEW_OUTCOME_LABELS,
+  REPLAY_REVIEW_PHASE_LABELS,
+  barIndexToTimelinePct,
+  calculateReviewUnrealizedPct,
+  calculateReviewUnrealizedPnl,
+  resolveReplayReviewOutcome,
+  resolveReplayReviewPhase,
+  resolveTargetTradeReview,
+  type PaperBracketSnapshot,
+  type PaperExitReason,
+  type ReplayReviewOutcome,
+  type ReplayReviewPhase,
+  type ReplayTradeReview,
+} from "@/lib/replay-review";
 
 type View = "desk" | "scanner" | "research" | "backtests" | "replay" | "playbooks" | "paper" | "journal" | "settings";
 type ScannerSort = "active" | "gainers" | "decliners";
@@ -105,6 +120,10 @@ type PaperTrade = {
   backtestRef?: PaperBacktestRef;
   playbookName?: string;
   exitNote?: string;
+  /** Structured exit attribution captured at close time (new fills only). */
+  exitReason?: PaperExitReason;
+  /** Bracket levels exactly as they stood when the position was closed. */
+  bracketSnapshot?: PaperBracketSnapshot;
 };
 type ClosedPaperTrade = {
   id: string;
@@ -125,6 +144,12 @@ type ClosedPaperTrade = {
   backtestRefs: PaperBacktestRef[];
   playbookNames: string[];
   exitNote: string;
+  /** Resolved exit attribution; falls back to "unknown" for legacy records. */
+  outcome: ReplayReviewOutcome;
+  /** Take-profit level recorded at close, or null when none was ever set. */
+  takeProfitPrice: number | null;
+  /** Stop-loss level recorded at close, or null when none was ever set. */
+  stopLossPrice: number | null;
 };
 type PaperLedgerPosition = {
   quantity: number;
@@ -404,6 +429,12 @@ export type ReplayTargetTrade = {
   origin: "paper" | "backtests";
   strategyLabel?: string;
   candles?: Candle[];
+  /** Bracket levels carried over from the source engine, when it recorded any. */
+  takeProfitPrice?: number | null;
+  stopLossPrice?: number | null;
+  /** True exit attribution carried over from the source engine, when known. */
+  outcome?: ReplayReviewOutcome | null;
+  exitNote?: string | null;
 };
 
 function PriceChart({
@@ -416,7 +447,7 @@ function PriceChart({
   replayBrackets,
   replayTrades,
   activePosition,
-  targetTradeReference,
+  targetTradeReview,
 }: {
   candles: Candle[];
   label: string;
@@ -437,12 +468,17 @@ function PriceChart({
     entryTime: number;
     quantity: number;
   } | null;
-  targetTradeReference?: {
-    entryPrice: number;
-    exitPrice: number;
-    side: "buy" | "sell";
-    netPnl?: number;
-    returnPct?: number;
+  /**
+   * The historical trade under review plus the replay playhead state. Geometry
+   * is derived inside the chart, but *what* may be drawn is decided by `phase`,
+   * so the trade reveals itself bar by bar instead of spoiling the ending with
+   * full-width lines drawn from the very first frame.
+   */
+  targetTradeReview?: {
+    review: ReplayTradeReview;
+    phase: ReplayReviewPhase;
+    /** Close of the current playhead bar; drives the open-position pin. */
+    markPrice: number | null;
     label?: string;
   } | null;
 }) {
@@ -751,14 +787,6 @@ function PriceChart({
     ? chartData.padTop + ((chartData.maxHigh - replayBrackets.slPrice) / chartData.spread) * chartData.usableHeight
     : null;
 
-  // Target Trade Review Coordinates (for historical replay handoff)
-  const targetEntryY = targetTradeReference && targetTradeReference.entryPrice > 0 && chartData
-    ? chartData.padTop + ((chartData.maxHigh - targetTradeReference.entryPrice) / chartData.spread) * chartData.usableHeight
-    : null;
-  const targetExitY = targetTradeReference && targetTradeReference.exitPrice > 0 && chartData
-    ? chartData.padTop + ((chartData.maxHigh - targetTradeReference.exitPrice) / chartData.spread) * chartData.usableHeight
-    : null;
-
   const isBuy = replayBrackets?.side === "buy";
   const tpDist = replayBrackets && replayBrackets.tpPrice && replayBrackets.entryPrice > 0
     ? (isBuy ? replayBrackets.tpPrice - replayBrackets.entryPrice : replayBrackets.entryPrice - replayBrackets.tpPrice)
@@ -844,6 +872,184 @@ function PriceChart({
   }, [draggingBracket, chartData, replayBrackets, height]);
 
   if (!chartData) return <div className="chart-empty">Waiting for candle data…</div>;
+
+  // ── Reviewed historical trade: progressive reveal geometry ───────────────
+  // `phase` comes from the desk, which compares the playhead clock against the
+  // trade's own entry/exit timestamps. That is what keeps the replay honest:
+  // before the tape reaches the entry bar nothing at all is drawn, while the
+  // position is open only the entry and its bracket are drawn, and the exit
+  // price/outcome appear on the bar the trade actually closed.
+  //
+  // Plain consts (not hooks) because they sit after the `!chartData` early
+  // return, and every hook in this component is declared above it.
+  const targetReview = (() => {
+    if (!targetTradeReview) return null;
+    const { review, phase, markPrice } = targetTradeReview;
+    const rows = chartData.rows;
+    const firstRowTime = rows[0]?.time ?? null;
+
+    const yFor = (price: number | null): number | null => {
+      if (price === null || !(price > 0)) return null;
+      const raw = chartData.padTop + ((chartData.maxHigh - price) / chartData.spread) * chartData.usableHeight;
+      return Math.max(chartData.padTop + 6, Math.min(height - chartData.padBottom - 6, raw));
+    };
+
+    const indexOfTime = (time: number | null): number | null => {
+      if (time === null) return null;
+      const found = rows.findIndex((candle) => candle.time === time);
+      return found === -1 ? null : found;
+    };
+
+    const entryRevealed = phase !== "pre-entry";
+    const exitRevealed = phase === "closed";
+    const entryIdx = indexOfTime(review.entryTime);
+    const exitIdx = indexOfTime(review.exitTime);
+
+    // Panning can scroll the entry bar out of the viewport. The levels then run
+    // in from the left edge rather than vanishing, so context is preserved.
+    const xForRevealedTime = (time: number | null, idx: number | null, revealed: boolean): number | null => {
+      if (!revealed) return null;
+      if (idx !== null) return (idx + 0.5) * chartData.barWidth;
+      if (time !== null && firstRowTime !== null && time < firstRowTime) return 0;
+      return null;
+    };
+
+    const entryX = xForRevealedTime(review.entryTime, entryIdx, entryRevealed);
+    const exitX = xForRevealedTime(review.exitTime, exitIdx, exitRevealed);
+    const entryY = entryRevealed ? yFor(review.entryPrice) : null;
+    const exitY = exitRevealed ? yFor(review.exitPrice) : null;
+    const takeProfitY = entryRevealed ? yFor(review.takeProfitPrice) : null;
+    const stopLossY = entryRevealed ? yFor(review.stopLossPrice) : null;
+
+    // The price path the trade actually took, drawn only as far as allowed.
+    let pathEndIdx = rows.length - 1;
+    if (exitRevealed && exitIdx !== null) pathEndIdx = Math.min(pathEndIdx, exitIdx);
+    const pathStartIdx = entryIdx ?? 0;
+    let trajectory = "";
+    if (entryRevealed && pathEndIdx >= pathStartIdx && pathStartIdx < rows.length) {
+      const segments: string[] = [];
+      if (entryX !== null && entryY !== null && entryIdx === null) {
+        segments.push(`M${entryX.toFixed(2)},${entryY.toFixed(2)}`);
+      }
+      for (let i = Math.max(0, pathStartIdx); i <= pathEndIdx; i += 1) {
+        const row = rows[i];
+        if (!row) continue;
+        const x = (i + 0.5) * chartData.barWidth;
+        const y = yFor(row.close);
+        if (y === null) continue;
+        segments.push(`${segments.length === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`);
+      }
+      trajectory = segments.join(" ");
+    }
+
+    // Which level the trade finally met, so it can be emphasised on close.
+    const hitLevel: "tp" | "sl" | "exit" | null = !exitRevealed
+      ? null
+      : review.outcome === "take_profit"
+        ? (review.takeProfitPrice !== null ? "tp" : "exit")
+        : review.outcome === "stop_loss" || review.outcome === "trailing_stop"
+          ? (review.stopLossPrice !== null ? "sl" : "exit")
+          : "exit";
+
+    return {
+      review,
+      phase,
+      entryRevealed,
+      exitRevealed,
+      entryIdx,
+      exitIdx,
+      entryX,
+      exitX,
+      entryY,
+      exitY,
+      takeProfitY,
+      stopLossY,
+      hitLevel,
+      trajectory,
+      lineStartX: entryX ?? 0,
+      lineEndX: chartData.width,
+      corridorEndX: chartData.plotWidth,
+      markY: yFor(markPrice),
+      liveX: (rows.length - 0.5) * chartData.barWidth,
+      // Floating result at the playhead. Only meaningful while the position is
+      // open, and only when the viewport is snapped to the playhead bar.
+      markPct: calculateReviewUnrealizedPct(review, markPrice),
+      markPnl: calculateReviewUnrealizedPnl(review, markPrice),
+      showLive: panOffset === 0 && phase === "in-trade",
+    };
+  })();
+
+  // Right-rail price tags for the reviewed trade. Levels crowd each other on a
+  // tight bracket, so stack them greedily with a minimum gap instead of letting
+  // two pills overlap into unreadable text.
+  const reviewRailTags = (() => {
+    if (!targetReview) return [] as { key: string; kicker: string; value: string; tone: string; hit: boolean; y: number }[];
+    const raw: { key: string; kicker: string; value: string; tone: string; hit: boolean; y: number }[] = [];
+    if (targetReview.entryRevealed && targetReview.entryY !== null) {
+      raw.push({
+        key: "entry",
+        kicker: "ENTRY",
+        value: `$${formatPrice(targetReview.review.entryPrice)}`,
+        tone: "entry",
+        hit: false,
+        y: targetReview.entryY,
+      });
+    }
+    if (targetReview.takeProfitY !== null) {
+      raw.push({
+        key: "tp",
+        kicker: targetReview.hitLevel === "tp" ? "TP HIT" : "TAKE PROFIT",
+        value: `$${formatPrice(targetReview.review.takeProfitPrice!)}`,
+        tone: "tp",
+        hit: targetReview.hitLevel === "tp",
+        y: targetReview.takeProfitY,
+      });
+    }
+    if (targetReview.stopLossY !== null) {
+      raw.push({
+        key: "sl",
+        kicker: targetReview.hitLevel === "sl" ? "SL HIT" : "STOP LOSS",
+        value: `$${formatPrice(targetReview.review.stopLossPrice!)}`,
+        tone: "sl",
+        hit: targetReview.hitLevel === "sl",
+        y: targetReview.stopLossY,
+      });
+    }
+    if (targetReview.phase === "in-trade" && targetReview.markY !== null) {
+      const pct = targetReview.markPct;
+      raw.push({
+        key: "mark",
+        kicker: "OPEN",
+        value: pct === null ? `$${formatPrice(targetTradeReview?.markPrice ?? 0)}` : `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+        tone: pct !== null && pct < 0 ? "sl" : "tp",
+        hit: false,
+        y: targetReview.markY,
+      });
+    }
+    if (targetReview.exitRevealed && targetReview.exitY !== null) {
+      const isWin = targetReview.review.netPnl >= 0;
+      raw.push({
+        key: "exit",
+        kicker: "EXIT",
+        value: `$${formatPrice(targetReview.review.exitPrice)}`,
+        tone: isWin ? "win" : "loss",
+        hit: targetReview.hitLevel === "exit",
+        y: targetReview.exitY,
+      });
+    }
+
+    const minGap = 26;
+    const top = chartData.padTop + 10;
+    const bottom = height - chartData.padBottom - 10;
+    const ordered = raw.sort((left, right) => left.y - right.y);
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const tag of ordered) {
+      const clamped = Math.max(top, Math.min(bottom, tag.y));
+      tag.y = Math.max(clamped, Math.min(previous + minGap, bottom));
+      previous = tag.y;
+    }
+    return ordered;
+  })();
 
   const currentHover = hoverIndex !== null && chartData.rows[hoverIndex]
     ? chartData.rows[hoverIndex]
@@ -1427,32 +1633,170 @@ function PriceChart({
             </g>
           )}
 
-          {/* Target Trade Historical Review Reference Guidelines & Corridor */}
-          {targetTradeReference && targetEntryY !== null && targetExitY !== null && (
-            <g className="chart-target-trade-layer" pointerEvents="none">
-              <rect
-                x="0"
-                y={Math.min(targetEntryY, targetExitY)}
-                width={chartData.plotWidth}
-                height={Math.max(1, Math.abs(targetEntryY - targetExitY))}
-                className={`target-trade-corridor ${(targetTradeReference.netPnl ?? 0) >= 0 ? "is-win" : "is-loss"}`}
-              />
-              <line
-                x1="0"
-                x2={chartData.width}
-                y1={targetEntryY}
-                y2={targetEntryY}
-                className="target-trade-line-entry"
-              />
-              <line
-                x1="0"
-                x2={chartData.width}
-                y1={targetExitY}
-                y2={targetExitY}
-                className="target-trade-line-exit"
-              />
-            </g>
-          )}
+          {/* ── Reviewed trade: progressive Entry / Stop Loss / Take Profit ──
+              Nothing is drawn before the tape reaches the entry bar, the
+              bracket appears the moment the position opens, and the exit level
+              only lands on the bar the trade actually closed. */}
+          {targetReview && targetReview.entryRevealed && (() => {
+            const {
+              review,
+              entryX,
+              exitX,
+              entryY,
+              exitY,
+              takeProfitY,
+              stopLossY,
+              trajectory,
+              hitLevel,
+              lineStartX,
+              lineEndX,
+              corridorEndX,
+              liveX,
+              exitRevealed,
+              markY,
+              showLive,
+            } = targetReview;
+            const baseline = height - (showVolume ? 18 : chartData.padBottom);
+            const startX = entryX ?? 0;
+            // Corridors only fill as far as the tape has travelled, so the
+            // shaded risk/reward zones grow while the position is still open.
+            const fillEndX = exitRevealed && exitX !== null
+              ? Math.max(startX, exitX)
+              : Math.max(startX, Math.min(liveX, corridorEndX));
+            const corridorWidth = fillEndX - startX;
+            const crowded = (x: number) => x > chartData.plotWidth * 0.62;
+            const captionX = (x: number) => (crowded(x) ? x - 10 : x + 10);
+            const captionAnchor = (x: number) => (crowded(x) ? "end" : "start");
+            const takeProfit = review.takeProfitPrice ?? 0;
+            const stopLoss = review.stopLossPrice ?? 0;
+            return (
+              <g className="chart-target-trade-layer" pointerEvents="none">
+                {/* Reward zone: entry -> take profit */}
+                {takeProfitY !== null && entryY !== null && corridorWidth > 0 && (
+                  <rect
+                    x={startX}
+                    y={Math.min(entryY, takeProfitY)}
+                    width={corridorWidth}
+                    height={Math.max(1, Math.abs(takeProfitY - entryY))}
+                    className={`target-trade-corridor corridor-reward${hitLevel === "tp" ? " is-hit" : ""}`}
+                  />
+                )}
+                {/* Risk zone: entry -> stop loss */}
+                {stopLossY !== null && entryY !== null && corridorWidth > 0 && (
+                  <rect
+                    x={startX}
+                    y={Math.min(entryY, stopLossY)}
+                    width={corridorWidth}
+                    height={Math.max(1, Math.abs(stopLossY - entryY))}
+                    className={`target-trade-corridor corridor-risk${hitLevel === "sl" ? " is-hit" : ""}`}
+                  />
+                )}
+                {/* The path price actually took, revealed bar by bar */}
+                {trajectory && <path d={trajectory} className="target-trade-trajectory" />}
+                {/* Entry / exit bar markers answer "when did it get in and out" */}
+                {entryX !== null && (
+                  <line x1={entryX} x2={entryX} y1={chartData.padTop} y2={baseline} className="target-trade-event-line event-entry" />
+                )}
+                {exitRevealed && exitX !== null && (
+                  <line x1={exitX} x2={exitX} y1={chartData.padTop} y2={baseline} className="target-trade-event-line event-exit" />
+                )}
+                {entryY !== null && (
+                  <line x1={lineStartX} x2={lineEndX} y1={entryY} y2={entryY} className="target-trade-line-entry" />
+                )}
+                {takeProfitY !== null && (
+                  <line
+                    x1={lineStartX}
+                    x2={lineEndX}
+                    y1={takeProfitY}
+                    y2={takeProfitY}
+                    className={`target-trade-line-tp${hitLevel === "tp" ? " is-hit" : ""}`}
+                  />
+                )}
+                {stopLossY !== null && (
+                  <line
+                    x1={lineStartX}
+                    x2={lineEndX}
+                    y1={stopLossY}
+                    y2={stopLossY}
+                    className={`target-trade-line-sl${hitLevel === "sl" ? " is-hit" : ""}`}
+                  />
+                )}
+                {exitRevealed && exitY !== null && (
+                  <line
+                    x1={lineStartX}
+                    x2={lineEndX}
+                    y1={exitY}
+                    y2={exitY}
+                    className={`target-trade-line-exit${hitLevel === "exit" ? " is-hit" : ""}`}
+                  />
+                )}
+                {entryX !== null && entryY !== null && (
+                  <>
+                    <circle cx={entryX} cy={entryY} r={5} className="target-trade-pin pin-entry" />
+                    <text
+                      x={captionX(entryX)}
+                      y={chartData.padTop + 13}
+                      textAnchor={captionAnchor(entryX)}
+                      className="target-trade-caption caption-entry"
+                    >
+                      {`ENTRY $${formatPrice(review.entryPrice)}`}
+                    </text>
+                  </>
+                )}
+                {takeProfitY !== null && (
+                  <text
+                    x={lineStartX + 8}
+                    y={Math.max(chartData.padTop + 11, takeProfitY - 7)}
+                    textAnchor="start"
+                    className={`target-trade-caption caption-tp${hitLevel === "tp" ? " is-hit" : ""}`}
+                  >
+                    {`${hitLevel === "tp" ? "TP HIT" : "TAKE PROFIT"} $${formatPrice(takeProfit)}`}
+                  </text>
+                )}
+                {stopLossY !== null && (
+                  <text
+                    x={lineStartX + 8}
+                    y={Math.min(baseline - 4, stopLossY + 15)}
+                    textAnchor="start"
+                    className={`target-trade-caption caption-sl${hitLevel === "sl" ? " is-hit" : ""}`}
+                  >
+                    {`${hitLevel === "sl" ? "SL HIT" : "STOP LOSS"} $${formatPrice(stopLoss)}`}
+                  </text>
+                )}
+                {showLive && markY !== null && (
+                  <>
+                    <circle cx={liveX} cy={markY} r={5} className="target-trade-pin pin-live" />
+                    <text
+                      x={captionX(liveX)}
+                      y={markY - 11}
+                      textAnchor={captionAnchor(liveX)}
+                      className="target-trade-caption caption-live"
+                    >
+                      OPEN
+                    </text>
+                  </>
+                )}
+                {exitRevealed && exitX !== null && exitY !== null && (
+                  <>
+                    <circle
+                      cx={exitX}
+                      cy={exitY}
+                      r={5}
+                      className={`target-trade-pin pin-exit${review.netPnl >= 0 ? " is-win" : " is-loss"}`}
+                    />
+                    <text
+                      x={captionX(exitX)}
+                      y={chartData.padTop + 27}
+                      textAnchor={captionAnchor(exitX)}
+                      className={`target-trade-caption caption-exit${review.netPnl >= 0 ? " is-win" : " is-loss"}`}
+                    >
+                      {`EXIT $${formatPrice(review.exitPrice)}`}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          })()}
 
           {/* Dual-Axis Crosshairs */}
           {hoverIndex !== null && hoverIndex < chartData.rows.length && (
@@ -1613,35 +1957,22 @@ function PriceChart({
             </>
           )}
 
-          {/* Target Trade Historical Review Price Rail Tags */}
-          {targetTradeReference && !replayBrackets && (
-            <>
-              {targetEntryY !== null && (
-                <div
-                  className="rail-chevron-tag rail-tag-target-entry"
-                  style={{ top: `${Math.max(chartData.padTop + 10, Math.min(height - chartData.padBottom - 10, targetEntryY))}px` }}
-                >
-                  <span className="rail-chevron-notch notch-target-entry">◀</span>
-                  <div className="rail-chevron-body target-tag-bg-entry">
-                    <span className="rail-tag-kicker">HIST ENTRY</span>
-                    <span className="rail-tag-val">${formatPrice(targetTradeReference.entryPrice)}</span>
-                  </div>
-                </div>
-              )}
-              {targetExitY !== null && (
-                <div
-                  className="rail-chevron-tag rail-tag-target-exit"
-                  style={{ top: `${Math.max(chartData.padTop + 10, Math.min(height - chartData.padBottom - 10, targetExitY))}px` }}
-                >
-                  <span className="rail-chevron-notch notch-target-exit">◀</span>
-                  <div className={`rail-chevron-body ${(targetTradeReference.netPnl ?? 0) >= 0 ? "target-tag-bg-win" : "target-tag-bg-loss"}`}>
-                    <span className="rail-tag-kicker">HIST EXIT</span>
-                    <span className="rail-tag-val">${formatPrice(targetTradeReference.exitPrice)}</span>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          {/* Reviewed trade price rail tags. Rendered independently of the live
+              bracket preview so a user's own bracket and the historical levels
+              can coexist, and stacked by the greedy de-overlap pass above. */}
+          {reviewRailTags.map((tag) => (
+            <div
+              key={tag.key}
+              className={`rail-chevron-tag rail-tag-review tone-${tag.tone}${tag.hit ? " is-hit" : ""}`}
+              style={{ top: `${tag.y}px` }}
+            >
+              <span className={`rail-chevron-notch notch-review notch-${tag.tone}`}>◀</span>
+              <div className={`rail-chevron-body review-tag-bg-${tag.tone}`}>
+                <span className="rail-tag-kicker">{tag.kicker}</span>
+                <span className="rail-tag-val">{tag.value}</span>
+              </div>
+            </div>
+          ))}
 
           {/* Live Crosshair Price Badge */}
           {hoverIndex !== null && hoverIndex < chartData.rows.length && (
@@ -2397,6 +2728,12 @@ export default function TradingDesk() {
         backtestRefs: [...position.backtestRefs.values()],
         playbookNames: [...position.playbookNames],
         exitNote: trade.exitNote ?? "",
+        // Exit attribution for the Replay Studio review. New fills carry an
+        // explicit reason; legacy records fall back to the bracket engine's
+        // stable note prefixes, and anything else stays honestly "unknown".
+        outcome: resolveReplayReviewOutcome(trade.exitReason, trade.exitNote),
+        takeProfitPrice: trade.bracketSnapshot?.takeProfitPrice ?? null,
+        stopLossPrice: trade.bracketSnapshot?.stopLossPrice ?? null,
       });
       position.quantity -= quantity;
       position.costBasis = Math.max(0, position.costBasis - entryPrice * quantity);
@@ -2595,12 +2932,12 @@ export default function TradingDesk() {
       if (quoteAge > 120_000) return;
 
       if (bracket.takeProfitPrice && quote.price >= bracket.takeProfitPrice) {
-        void closePaperPosition(pos.symbol, `Take-Profit hit at ${formatMoney(quote.price)} (+${bracket.takeProfitPct ?? "target"}%)`);
+        void closePaperPosition(pos.symbol, `Take-Profit hit at ${formatMoney(quote.price)} (+${bracket.takeProfitPct ?? "target"}%)`, "take_profit");
         return;
       }
 
       if (bracket.stopLossPrice && quote.price <= bracket.stopLossPrice) {
-        void closePaperPosition(pos.symbol, `Stop-Loss triggered at ${formatMoney(quote.price)} (-${bracket.stopLossPct ?? "invalidation"}%)`);
+        void closePaperPosition(pos.symbol, `Stop-Loss triggered at ${formatMoney(quote.price)} (-${bracket.stopLossPct ?? "invalidation"}%)`, "stop_loss");
         return;
       }
 
@@ -2608,7 +2945,7 @@ export default function TradingDesk() {
         const peak = Math.max(bracket.peakPrice || pos.averageEntry, quote.price);
         const trailThreshold = peak * (1 - bracket.trailingStopPct / 100);
         if (quote.price <= trailThreshold) {
-          void closePaperPosition(pos.symbol, `Trailing stop hit at ${formatMoney(quote.price)} (Peak was ${formatMoney(peak)})`);
+          void closePaperPosition(pos.symbol, `Trailing stop hit at ${formatMoney(quote.price)} (Peak was ${formatMoney(peak)})`, "trailing_stop");
           return;
         } else if (peak > (bracket.peakPrice || 0)) {
           setPaperBrackets((prev) => {
@@ -3139,7 +3476,18 @@ export default function TradingDesk() {
     window.setTimeout(() => setPaperMessage(""), 3500);
   }
 
-  async function closePaperPosition(asset: string, customExitNote?: string) {
+  /**
+   * Flatten a paper position and stamp the fill with *why* it closed.
+   *
+   * `exitReason` is what lets the Replay Studio say "Take Profit hit" instead
+   * of guessing from free text. Callers that know the trigger pass it; only a
+   * genuinely unattributed close falls back to "manual".
+   */
+  async function closePaperPosition(
+    asset: string,
+    customExitNote?: string,
+    exitReason: PaperExitReason = "manual"
+  ) {
     if (closingAssets.current.has(asset)) return;
     const position = openPositions.find((entry) => entry.symbol === asset);
     if (!position) {
@@ -3160,6 +3508,24 @@ export default function TradingDesk() {
         throw new Error(`Bitget did not return a usable ${asset} quote.`);
       }
 
+      // Snapshot the bracket exactly as it stood at the closing fill. The
+      // bracket row is deleted a few lines below, so this is the last chance to
+      // remember the stop/target the position was actually managed against.
+      const closingBracket = paperBrackets[asset];
+      const bracketSnapshot: PaperBracketSnapshot | undefined = closingBracket
+        ? {
+            ...(closingBracket.takeProfitPrice && closingBracket.takeProfitPrice > 0
+              ? { takeProfitPrice: closingBracket.takeProfitPrice }
+              : {}),
+            ...(closingBracket.stopLossPrice && closingBracket.stopLossPrice > 0
+              ? { stopLossPrice: closingBracket.stopLossPrice }
+              : {}),
+            ...(closingBracket.trailingStopPct && closingBracket.trailingStopPct > 0
+              ? { trailingStopPct: closingBracket.trailingStopPct }
+              : {}),
+          }
+        : undefined;
+
       const trade: PaperTrade = {
         id: crypto.randomUUID(),
         symbol: asset,
@@ -3169,6 +3535,8 @@ export default function TradingDesk() {
         createdAt: Date.now(),
         feeBps: paperFeeBps,
         exitNote: customExitNote,
+        exitReason,
+        bracketSnapshot,
       };
       setPaperTrades((previous) => {
         const next = [trade, ...previous];
@@ -3298,7 +3666,7 @@ export default function TradingDesk() {
         }
       } else if (evaluation.action === "sell") {
         if (position && position.quantity > 0) {
-          void closePaperPosition(targetPlaybook.symbol, `Rule Engine Exit: ${evaluation.reason}`);
+    void closePaperPosition(targetPlaybook.symbol, `Rule Engine Exit: ${evaluation.reason}`, "signal_exit");
           actionTaken = "sell";
           logMsg = `Rule Engine Exit: Closed ${position.quantity.toFixed(4)} ${targetPlaybook.symbol} at ${formatMoney(currentPrice)} (${evaluation.reason})`;
         } else {
@@ -3604,6 +3972,12 @@ export default function TradingDesk() {
       side: "buy",
       origin: "paper",
       strategyLabel: tradeStrategyLabel(trade),
+      // Carry the real bracket levels and the real exit attribution into the
+      // replay, so the chart shows what the trader actually risked.
+      takeProfitPrice: trade.takeProfitPrice,
+      stopLossPrice: trade.stopLossPrice,
+      outcome: trade.outcome,
+      exitNote: trade.exitNote || null,
     };
     setReplayTargetTrade(target);
     if (symbol !== trade.symbol) {
@@ -3629,6 +4003,17 @@ export default function TradingDesk() {
       origin: "backtests",
       strategyLabel: strategyPromptText ? (strategyPromptText.length > 50 ? strategyPromptText.slice(0, 48) + "…" : strategyPromptText) : "Quantitative Backtest Rule",
       candles: backtestCandles,
+      // The rule engine places no bracket orders, so it never recorded a stop
+      // or a target. Report that honestly instead of back-fitting a level that
+      // would make the replay look more planned than the strategy really was.
+      takeProfitPrice: null,
+      stopLossPrice: null,
+      outcome: trade.exitReason === "signal"
+        ? "signal_exit"
+        : trade.exitReason === "end_of_data"
+          ? "end_of_data"
+          : null,
+      exitNote: null,
     };
     setReplayTargetTrade(target);
     if (symbol !== testSymbol) {
@@ -3646,6 +4031,53 @@ export default function TradingDesk() {
     const currentPrice = currentReplayCandle?.close ?? 0;
     return calculateReplayScorecard(replayWallet, currentPrice);
   }, [replayWallet, currentReplayCandle]);
+
+  // Historical trade review state. Everything the Replay Studio needs to
+  // narrate one closed trade: where it entered, where the stop and the target
+  // sat, where it finally left the market, and why.
+  const replayTradeReview = useMemo<ReplayTradeReview | null>(() => {
+    if (!replayTargetTrade) return null;
+    return resolveTargetTradeReview(
+      {
+        openedAt: replayTargetTrade.openedAt,
+        closedAt: replayTargetTrade.closedAt,
+        entryPrice: replayTargetTrade.entryPrice,
+        exitPrice: replayTargetTrade.exitPrice,
+        side: replayTargetTrade.side,
+        netPnl: replayTargetTrade.netPnl,
+        returnPct: replayTargetTrade.returnPct,
+        quantity: replayTargetTrade.quantity ?? null,
+        takeProfitPrice: replayTargetTrade.takeProfitPrice ?? null,
+        stopLossPrice: replayTargetTrade.stopLossPrice ?? null,
+        outcome: replayTargetTrade.outcome ?? null,
+        exitNote: replayTargetTrade.exitNote ?? null,
+      },
+      effectiveMarket?.candles ?? null
+    );
+  }, [replayTargetTrade, effectiveMarket]);
+
+  // The playhead decides what may be drawn. Comparing it against the trade's
+  // own timestamps keeps the reveal honest even when the user pans the chart or
+  // uses the cut tool, because those expose bars without advancing the clock.
+  const reviewPhase: ReplayReviewPhase = replayTradeReview
+    ? resolveReplayReviewPhase(replayTradeReview, currentReplayCandle?.time ?? null)
+    : "pre-entry";
+  const reviewMarkPrice = currentReplayCandle?.close ?? null;
+  const reviewUnrealizedPnl = replayTradeReview
+    ? calculateReviewUnrealizedPnl(replayTradeReview, reviewMarkPrice)
+    : null;
+  const reviewUnrealizedPct = replayTradeReview
+    ? calculateReviewUnrealizedPct(replayTradeReview, reviewMarkPrice)
+    : null;
+
+  const totalTapeBars = effectiveMarket?.candles.length ?? 0;
+  const reviewEntryIndex = replayTradeReview?.entryIndex ?? null;
+  const reviewExitIndex = replayTradeReview?.exitIndex ?? null;
+  const reviewEntryTimelinePct = barIndexToTimelinePct(reviewEntryIndex, totalTapeBars);
+  const reviewExitTimelinePct = barIndexToTimelinePct(reviewExitIndex, totalTapeBars);
+  const reviewBarsHeldSoFar = reviewEntryIndex !== null
+    ? Math.max(0, replayIndex - reviewEntryIndex)
+    : null;
 
   const handleUpdateReplayTpPrice = useCallback((newPrice: number) => {
     if (replayWallet.position) {
@@ -3741,6 +4173,12 @@ export default function TradingDesk() {
         onSnapRiskReward: handleSnapRiskReward,
       };
     }
+    // While reviewing a historical trade there is no live position, so the only
+    // brackets left would be the order ticket's *preview* levels anchored to the
+    // current playhead bar. Those phantom TP/SL lines land right on top of the
+    // reviewed trade's real levels and are the single biggest reason the replay
+    // reads as confusing. Suppress them until the user actually enters a trade.
+    if (replayTargetTrade) return undefined;
     if (currentReplayCandle) {
       const entry = currentReplayCandle.close;
       const isBuy = replayTicketSide === "buy";
@@ -3763,6 +4201,7 @@ export default function TradingDesk() {
   }, [
     isReplayActive,
     replayWallet.position,
+    replayTargetTrade,
     currentReplayCandle,
     replayTicketSide,
     replayTicketAmount,
@@ -5757,15 +6196,44 @@ export default function TradingDesk() {
                     <span className={`replay-review-side ${replayTargetTrade.side === "buy" ? "is-long" : "is-short"}`}>
                       {replayTargetTrade.side === "buy" ? "LONG" : "SHORT"}
                     </span>
-                    <span className="replay-review-metric">
-                      Entry: <strong>${formatPrice(replayTargetTrade.entryPrice)}</strong>
+                    {/* Playhead phase, so the viewer always knows whether the
+                        trade has entered, is running, or has already closed. */}
+                    <span className={`replay-review-phase phase-${reviewPhase}`}>
+                      {REPLAY_REVIEW_PHASE_LABELS[reviewPhase]}
                     </span>
-                    <span className="replay-review-metric">
-                      Exit: <strong>${formatPrice(replayTargetTrade.exitPrice)}</strong>
-                    </span>
-                    <span className={`replay-review-pnl ${replayTargetTrade.netPnl >= 0 ? "tone-up" : "tone-down"}`}>
-                      {replayTargetTrade.netPnl >= 0 ? "+" : ""}{formatMoney(replayTargetTrade.netPnl)} ({replayTargetTrade.returnPct >= 0 ? "+" : ""}{replayTargetTrade.returnPct.toFixed(2)}%)
-                    </span>
+                    {/* Entry, exit and P&L stay withheld until the tape has
+                        actually reached them — the replay never spoils its own
+                        ending while the position is still open. */}
+                    {reviewPhase === "pre-entry" ? (
+                      <span className="replay-review-metric is-pending">
+                        Entry: <strong>awaiting fill</strong>
+                      </span>
+                    ) : (
+                      <>
+                        <span className="replay-review-metric">
+                          Entry: <strong>${formatPrice(replayTargetTrade.entryPrice)}</strong>
+                        </span>
+                        {reviewPhase === "closed" ? (
+                          <>
+                            <span className="replay-review-metric">
+                              Exit: <strong>${formatPrice(replayTargetTrade.exitPrice)}</strong>
+                            </span>
+                            <span className={`replay-review-pnl ${replayTargetTrade.netPnl >= 0 ? "tone-up" : "tone-down"}`}>
+                              {replayTargetTrade.netPnl >= 0 ? "+" : ""}{formatMoney(replayTargetTrade.netPnl)} ({replayTargetTrade.returnPct >= 0 ? "+" : ""}{replayTargetTrade.returnPct.toFixed(2)}%)
+                            </span>
+                          </>
+                        ) : reviewUnrealizedPnl === null ? (
+                          <span className="replay-review-metric is-pending">
+                            Open P/L: <strong>--</strong>
+                          </span>
+                        ) : (
+                          <span className={`replay-review-pnl ${reviewUnrealizedPnl >= 0 ? "tone-up" : "tone-down"}`}>
+                            Open: {reviewUnrealizedPnl >= 0 ? "+" : ""}{formatMoney(reviewUnrealizedPnl)}
+                            {reviewUnrealizedPct === null ? "" : ` (${reviewUnrealizedPct >= 0 ? "+" : ""}${reviewUnrealizedPct.toFixed(2)}%)`}
+                          </span>
+                        )}
+                      </>
+                    )}
                     {replayTargetTrade.strategyLabel && (
                       <span className="replay-review-strategy" title={replayTargetTrade.strategyLabel}>
                         {replayTargetTrade.strategyLabel}
@@ -5848,12 +6316,10 @@ export default function TradingDesk() {
                         replayBrackets={replayBracketsConfig}
                         replayTrades={replayWallet.closedTrades}
                         activePosition={replayWallet.position}
-                        targetTradeReference={replayTargetTrade ? {
-                          entryPrice: replayTargetTrade.entryPrice,
-                          exitPrice: replayTargetTrade.exitPrice,
-                          side: replayTargetTrade.side,
-                          netPnl: replayTargetTrade.netPnl,
-                          returnPct: replayTargetTrade.returnPct,
+                        targetTradeReview={replayTargetTrade && replayTradeReview ? {
+                          review: replayTradeReview,
+                          phase: reviewPhase,
+                          markPrice: reviewMarkPrice,
                           label: replayTargetTrade.origin === "paper" ? "Paper Trade" : "Backtest Trade",
                         } : null}
                         onCutCandle={(candle) => {
@@ -5892,15 +6358,38 @@ export default function TradingDesk() {
                               {currentReplayCandle ? formatDate(currentReplayCandle.time, false) : "--"}
                             </span>
                           </div>
-                          <input
-                            type="range"
-                            min={0}
-                            max={Math.max(0, effectiveMarket.candles.length - 1)}
-                            value={Math.max(0, Math.min(effectiveMarket.candles.length - 1, replayIndex))}
-                            onChange={(e) => handleScrubIndex(Number(e.target.value))}
-                            className="replay-dock-scrubber"
-                            aria-label="Replay timeline scrubber"
-                          />
+                          <div className="replay-dock-scrubber-track">
+                            <input
+                              type="range"
+                              min={0}
+                              max={Math.max(0, effectiveMarket.candles.length - 1)}
+                              value={Math.max(0, Math.min(effectiveMarket.candles.length - 1, replayIndex))}
+                              onChange={(e) => handleScrubIndex(Number(e.target.value))}
+                              className="replay-dock-scrubber"
+                              aria-label="Replay timeline scrubber"
+                            />
+                            {/* Entry / exit ticks pin the reviewed trade to the
+                                timeline, so it is obvious how far into the tape
+                                the position opened and where it finally closed. */}
+                            {reviewEntryTimelinePct !== null && (
+                              <span
+                                className="scrubber-marker marker-entry"
+                                style={{ left: `calc(7.5px + ${reviewEntryTimelinePct / 100} * (100% - 15px))` }}
+                                aria-hidden="true"
+                              >
+                                <span className="scrubber-marker-label">ENTRY</span>
+                              </span>
+                            )}
+                            {reviewExitTimelinePct !== null && (
+                              <span
+                                className="scrubber-marker marker-exit"
+                                style={{ left: `calc(7.5px + ${reviewExitTimelinePct / 100} * (100% - 15px))` }}
+                                aria-hidden="true"
+                              >
+                                <span className="scrubber-marker-label">EXIT</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Transport Toolbar Row */}
@@ -6065,6 +6554,167 @@ export default function TradingDesk() {
                       </div>
                     </div>
                   </section>
+
+                  {/* Reviewed Trade Details — the phase aware readout of the
+                      same levels drawn on the chart. Values stay withheld until
+                      the tape has earned them, and nothing is invented when the
+                      source trade never recorded a bracket or an exit reason. */}
+                  {replayTargetTrade && replayTradeReview && (
+                    <section
+                      className="panel replay-card replay-trade-review-card"
+                      aria-labelledby="replay-review-details-heading"
+                    >
+                      <div className="replay-card-header">
+                        <h3 id="replay-review-details-heading">Trade Details</h3>
+                        <span className={`review-phase-badge phase-${reviewPhase}`}>
+                          {REPLAY_REVIEW_PHASE_LABELS[reviewPhase]}
+                        </span>
+                      </div>
+
+                      {reviewPhase === "closed" && (
+                        <div
+                          className={`review-outcome-banner outcome-${replayTradeReview.outcome} ${
+                            replayTradeReview.netPnl >= 0 ? "is-win" : "is-loss"
+                          }`}
+                        >
+                          <span className="review-outcome-label">{replayTradeReview.outcomeLabel}</span>
+                          <strong className="review-outcome-pnl">
+                            {replayTradeReview.netPnl >= 0 ? "+" : ""}{formatMoney(replayTradeReview.netPnl)}
+                            <span className="review-outcome-pct">
+                              {replayTradeReview.returnPct >= 0 ? "+" : ""}{replayTradeReview.returnPct.toFixed(2)}%
+                            </span>
+                          </strong>
+                        </div>
+                      )}
+
+                      <dl className="review-detail-grid">
+                        {(() => {
+                          const entryKnown = reviewPhase !== "pre-entry";
+                          const closed = reviewPhase === "closed";
+                          const stopHit = replayTradeReview.outcome === "stop_loss"
+                            || replayTradeReview.outcome === "trailing_stop";
+                          const targetHit = replayTradeReview.outcome === "take_profit";
+                          const rows: { key: string; label: string; value: string; tone: string; hit: boolean }[] = [];
+
+                          rows.push({
+                            key: "entry",
+                            label: "Entry price",
+                            value: entryKnown ? `$${formatPrice(replayTradeReview.entryPrice)}` : "Awaiting fill",
+                            tone: entryKnown ? "entry" : "pending",
+                            hit: false,
+                          });
+                          rows.push({
+                            key: "stop",
+                            label: "Stop Loss",
+                            value: !entryKnown
+                              ? "Awaiting fill"
+                              : replayTradeReview.stopLossPrice !== null
+                                ? `$${formatPrice(replayTradeReview.stopLossPrice)}`
+                                : "Not recorded",
+                            tone: !entryKnown
+                              ? "pending"
+                              : replayTradeReview.stopLossPrice !== null ? "sl" : "muted",
+                            hit: closed && stopHit && replayTradeReview.stopLossPrice !== null,
+                          });
+                          rows.push({
+                            key: "target",
+                            label: "Take Profit",
+                            value: !entryKnown
+                              ? "Awaiting fill"
+                              : replayTradeReview.takeProfitPrice !== null
+                                ? `$${formatPrice(replayTradeReview.takeProfitPrice)}`
+                                : "Not recorded",
+                            tone: !entryKnown
+                              ? "pending"
+                              : replayTradeReview.takeProfitPrice !== null ? "tp" : "muted",
+                            hit: closed && targetHit && replayTradeReview.takeProfitPrice !== null,
+                          });
+                          rows.push({
+                            key: "rr",
+                            label: "Planned R:R",
+                            value: !entryKnown
+                              ? "Awaiting fill"
+                              : replayTradeReview.riskRewardRatio !== null
+                                ? `${replayTradeReview.riskRewardRatio.toFixed(2)} : 1`
+                                : "Not derivable",
+                            tone: entryKnown && replayTradeReview.riskRewardRatio !== null ? "neutral" : "muted",
+                            hit: false,
+                          });
+                          rows.push({
+                            key: "held",
+                            label: closed ? "Bars held" : "Bars held so far",
+                            value: closed
+                              ? replayTradeReview.barsHeld !== null ? `${replayTradeReview.barsHeld}` : "--"
+                              : reviewBarsHeldSoFar !== null ? `${reviewBarsHeldSoFar}` : "--",
+                            tone: "neutral",
+                            hit: false,
+                          });
+                          rows.push({
+                            key: "exit",
+                            label: "Exit price",
+                            value: closed ? `$${formatPrice(replayTradeReview.exitPrice)}` : "Position still open",
+                            tone: closed ? "exit" : "pending",
+                            hit: false,
+                          });
+                          rows.push({
+                            key: "rmultiple",
+                            label: "Result (R multiple)",
+                            value: closed
+                              ? replayTradeReview.rMultiple !== null
+                                ? `${replayTradeReview.rMultiple >= 0 ? "+" : ""}${replayTradeReview.rMultiple.toFixed(2)}R`
+                                : "Not derivable"
+                              : "Position still open",
+                            tone: closed
+                              ? replayTradeReview.rMultiple !== null
+                                ? replayTradeReview.rMultiple >= 0 ? "tp" : "sl"
+                                : "muted"
+                              : "pending",
+                            hit: false,
+                          });
+                          if (entryKnown && !closed && reviewUnrealizedPnl !== null) {
+                            rows.push({
+                              key: "open",
+                              label: "Open P/L",
+                              value: `${reviewUnrealizedPnl >= 0 ? "+" : ""}${formatMoney(reviewUnrealizedPnl)}${
+                                reviewUnrealizedPct === null
+                                  ? ""
+                                  : ` (${reviewUnrealizedPct >= 0 ? "+" : ""}${reviewUnrealizedPct.toFixed(2)}%)`
+                              }`,
+                              tone: reviewUnrealizedPnl >= 0 ? "tp" : "sl",
+                              hit: false,
+                            });
+                          }
+
+                          return rows.map((row) => (
+                            <div
+                              key={row.key}
+                              className={`review-detail-row tone-${row.tone}${row.hit ? " is-hit" : ""}`}
+                            >
+                              <dt className="review-detail-label">{row.label}</dt>
+                              <dd className="review-detail-value">{row.value}</dd>
+                            </div>
+                          ));
+                        })()}
+                      </dl>
+
+                      {reviewPhase === "pre-entry" ? (
+                        <p className="review-hint">
+                          Entry, Stop Loss and Take Profit land on the chart the moment the tape reaches the entry bar
+                          {reviewEntryIndex !== null && reviewEntryIndex > replayIndex
+                            ? ` — ${reviewEntryIndex - replayIndex} bar${reviewEntryIndex - replayIndex === 1 ? "" : "s"} ahead.`
+                            : "."}
+                        </p>
+                      ) : reviewPhase === "in-trade" ? (
+                        <p className="review-hint">
+                          Position open. The exit price and final result stay withheld until the tape reaches the closing bar.
+                        </p>
+                      ) : (
+                        <p className="review-hint">
+                          Trade closed. Use the ENTRY and EXIT ticks on the timeline to scrub back through either bar.
+                        </p>
+                      )}
+                    </section>
+                  )}
 
                   {/* Discretionary Order Ticket */}
                   <section className="panel replay-card" aria-labelledby="replay-ticket-heading">
