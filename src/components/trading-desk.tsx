@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { ema, bollingerBands, macd, atr, getIndicatorSnapshot, evaluatePlaybookRule, type Candle, type MarketData, type SpotScanMarket } from "@/lib/bitget";
-import type { BacktestResult as SimulationResult } from "@/lib/backtest";
+import type { BacktestResult as SimulationResult, CompletedTrade } from "@/lib/backtest";
 import { ProviderSettings } from "@/components/provider-settings";
 import { generateBacktestPromptFromResearch, getStrategyTypeFromResearch } from "@/lib/research-strategy";
 import { OrderBookPanel } from "@/components/orderbook-panel";
@@ -359,6 +359,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     bolt: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
     chevronDown: <path d="m6 9 6 6 6-6" />,
     clock: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
+    history: <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></>,
   };
   return <svg {...common}>{paths[name] ?? paths.grid}</svg>;
 }
@@ -388,6 +389,22 @@ export type ReplayTradeMarker = {
   exitReason?: string;
 };
 
+export type ReplayTargetTrade = {
+  id: string;
+  symbol: string;
+  interval?: string;
+  openedAt: number;
+  closedAt: number;
+  entryPrice: number;
+  exitPrice: number;
+  quantity?: number;
+  netPnl: number;
+  returnPct: number;
+  side: "buy" | "sell";
+  origin: "paper" | "backtests";
+  strategyLabel?: string;
+};
+
 function PriceChart({
   candles,
   label,
@@ -398,6 +415,7 @@ function PriceChart({
   replayBrackets,
   replayTrades,
   activePosition,
+  targetTradeReference,
 }: {
   candles: Candle[];
   label: string;
@@ -417,6 +435,14 @@ function PriceChart({
     entryPrice: number;
     entryTime: number;
     quantity: number;
+  } | null;
+  targetTradeReference?: {
+    entryPrice: number;
+    exitPrice: number;
+    side: "buy" | "sell";
+    netPnl?: number;
+    returnPct?: number;
+    label?: string;
   } | null;
 }) {
   const [chartMode, setChartMode] = useState<"candles" | "line">("candles");
@@ -722,6 +748,14 @@ function PriceChart({
 
   const slY = replayBrackets && replayBrackets.slPrice && replayBrackets.slPrice > 0 && chartData
     ? chartData.padTop + ((chartData.maxHigh - replayBrackets.slPrice) / chartData.spread) * chartData.usableHeight
+    : null;
+
+  // Target Trade Review Coordinates (for historical replay handoff)
+  const targetEntryY = targetTradeReference && targetTradeReference.entryPrice > 0 && chartData
+    ? chartData.padTop + ((chartData.maxHigh - targetTradeReference.entryPrice) / chartData.spread) * chartData.usableHeight
+    : null;
+  const targetExitY = targetTradeReference && targetTradeReference.exitPrice > 0 && chartData
+    ? chartData.padTop + ((chartData.maxHigh - targetTradeReference.exitPrice) / chartData.spread) * chartData.usableHeight
     : null;
 
   const isBuy = replayBrackets?.side === "buy";
@@ -1392,6 +1426,33 @@ function PriceChart({
             </g>
           )}
 
+          {/* Target Trade Historical Review Reference Guidelines & Corridor */}
+          {targetTradeReference && targetEntryY !== null && targetExitY !== null && (
+            <g className="chart-target-trade-layer" pointerEvents="none">
+              <rect
+                x="0"
+                y={Math.min(targetEntryY, targetExitY)}
+                width={chartData.plotWidth}
+                height={Math.max(1, Math.abs(targetEntryY - targetExitY))}
+                className={`target-trade-corridor ${(targetTradeReference.netPnl ?? 0) >= 0 ? "is-win" : "is-loss"}`}
+              />
+              <line
+                x1="0"
+                x2={chartData.width}
+                y1={targetEntryY}
+                y2={targetEntryY}
+                className="target-trade-line-entry"
+              />
+              <line
+                x1="0"
+                x2={chartData.width}
+                y1={targetExitY}
+                y2={targetExitY}
+                className="target-trade-line-exit"
+              />
+            </g>
+          )}
+
           {/* Dual-Axis Crosshairs */}
           {hoverIndex !== null && hoverIndex < chartData.rows.length && (
             <g className="chart-crosshair-layer" pointerEvents="none">
@@ -1545,6 +1606,36 @@ function PriceChart({
                       <span className="rail-tag-kicker">{isSlAtBreakeven ? "BE · SL" : "SL"}</span>
                       <span className="rail-tag-val bracket-pill-text-sl">${formatPrice(replayBrackets.slPrice!)}</span>
                     </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Target Trade Historical Review Price Rail Tags */}
+          {targetTradeReference && !replayBrackets && (
+            <>
+              {targetEntryY !== null && (
+                <div
+                  className="rail-chevron-tag rail-tag-target-entry"
+                  style={{ top: `${Math.max(chartData.padTop + 10, Math.min(height - chartData.padBottom - 10, targetEntryY))}px` }}
+                >
+                  <span className="rail-chevron-notch notch-target-entry">◀</span>
+                  <div className="rail-chevron-body target-tag-bg-entry">
+                    <span className="rail-tag-kicker">HIST ENTRY</span>
+                    <span className="rail-tag-val">${formatPrice(targetTradeReference.entryPrice)}</span>
+                  </div>
+                </div>
+              )}
+              {targetExitY !== null && (
+                <div
+                  className="rail-chevron-tag rail-tag-target-exit"
+                  style={{ top: `${Math.max(chartData.padTop + 10, Math.min(height - chartData.padBottom - 10, targetExitY))}px` }}
+                >
+                  <span className="rail-chevron-notch notch-target-exit">◀</span>
+                  <div className={`rail-chevron-body ${(targetTradeReference.netPnl ?? 0) >= 0 ? "target-tag-bg-win" : "target-tag-bg-loss"}`}>
+                    <span className="rail-tag-kicker">HIST EXIT</span>
+                    <span className="rail-tag-val">${formatPrice(targetTradeReference.exitPrice)}</span>
                   </div>
                 </div>
               )}
@@ -1833,6 +1924,7 @@ export default function TradingDesk() {
   const [replayTicketAmount, setReplayTicketAmount] = useState<number>(500);
   const [replayTicketTpPct, setReplayTicketTpPct] = useState<number>(2.0);
   const [replayTicketSlPct, setReplayTicketSlPct] = useState<number>(1.0);
+  const [replayTargetTrade, setReplayTargetTrade] = useState<ReplayTargetTrade | null>(null);
 
   // Clamped market data for zero-hindsight simulation
   const activeMarket = useMemo(() => {
@@ -3383,6 +3475,7 @@ export default function TradingDesk() {
   const handleRestartReplay = useCallback(() => {
     if (!market) return;
     setReplayWallet(createInitialReplayWallet());
+    setReplayTargetTrade(null);
     const rewindStart = Math.max(0, market.candles.length - 25);
     setReplayIndex(rewindStart);
     setIsReplayPlaying(false);
@@ -3395,7 +3488,130 @@ export default function TradingDesk() {
     setScorecardModalOpen(false);
     setIsReplayPlaying(false);
     setIsCutMode(false);
-  }, []);
+    if (replayTargetTrade) {
+      const origin = replayTargetTrade.origin;
+      setReplayTargetTrade(null);
+      if (origin === "paper") {
+        setPaperTab("review");
+        setView("paper");
+      } else {
+        setView("backtests");
+      }
+    }
+  }, [replayTargetTrade]);
+
+  const handleExitTradeReview = useCallback(() => {
+    setIsReplayPlaying(false);
+    const origin = replayTargetTrade?.origin ?? "paper";
+    setReplayTargetTrade(null);
+    if (origin === "paper") {
+      setPaperTab("review");
+      setView("paper");
+    } else {
+      setView("backtests");
+    }
+  }, [replayTargetTrade]);
+
+  const handleJumpToSetup = useCallback(() => {
+    if (!market || !replayTargetTrade) return;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < market.candles.length; i++) {
+      const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    }
+    const setupIdx = Math.max(0, closestIdx - 25);
+    setReplayIndex(setupIdx);
+    setIsReplayPlaying(false);
+    setToastMessage("Jumped to setup window (25 bars prior to entry)");
+  }, [market, replayTargetTrade]);
+
+  const handleJumpToEntry = useCallback(() => {
+    if (!market || !replayTargetTrade) return;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < market.candles.length; i++) {
+      const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    }
+    setReplayIndex(closestIdx);
+    setIsReplayPlaying(false);
+    setToastMessage("Jumped to trade entry bar");
+  }, [market, replayTargetTrade]);
+
+  const handleJumpToExit = useCallback(() => {
+    if (!market || !replayTargetTrade) return;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < market.candles.length; i++) {
+      const diff = Math.abs(market.candles[i].time - replayTargetTrade.closedAt);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    }
+    setReplayIndex(closestIdx);
+    setIsReplayPlaying(false);
+    setToastMessage("Jumped to trade exit bar");
+  }, [market, replayTargetTrade]);
+
+  const replayFromPaperTrade = useCallback((trade: ClosedPaperTrade) => {
+    const target: ReplayTargetTrade = {
+      id: trade.id,
+      symbol: trade.symbol,
+      interval: interval,
+      openedAt: trade.openedAt,
+      closedAt: trade.closedAt,
+      entryPrice: trade.entryPrice,
+      exitPrice: trade.exitPrice,
+      quantity: trade.quantity,
+      netPnl: trade.netPnl,
+      returnPct: trade.returnPct,
+      side: "buy",
+      origin: "paper",
+      strategyLabel: tradeStrategyLabel(trade),
+    };
+    setReplayTargetTrade(target);
+    if (symbol !== trade.symbol) {
+      setSymbol(trade.symbol);
+    }
+    setIsReplayPlaying(false);
+    setView("replay");
+    setToastMessage(`Loaded paper trade review for ${trade.symbol}`);
+  }, [interval, symbol]);
+
+  const replayFromBacktestTrade = useCallback((trade: CompletedTrade, testSymbol: string, testInterval: string, strategyPromptText?: string) => {
+    const target: ReplayTargetTrade = {
+      id: `backtest-${trade.entryAt}-${trade.exitAt}`,
+      symbol: testSymbol,
+      interval: testInterval,
+      openedAt: trade.entryAt,
+      closedAt: trade.exitAt,
+      entryPrice: trade.entryPrice,
+      exitPrice: trade.exitPrice,
+      netPnl: trade.pnl,
+      returnPct: trade.returnPct,
+      side: "buy",
+      origin: "backtests",
+      strategyLabel: strategyPromptText ? (strategyPromptText.length > 50 ? strategyPromptText.slice(0, 48) + "…" : strategyPromptText) : "Quantitative Backtest Rule",
+    };
+    setReplayTargetTrade(target);
+    if (symbol !== testSymbol) {
+      setSymbol(testSymbol);
+    }
+    if (interval !== testInterval) {
+      setInterval(testInterval);
+    }
+    setIsReplayPlaying(false);
+    setView("replay");
+    setToastMessage(`Loaded backtest trade replay for ${testSymbol} ${testInterval}`);
+  }, [symbol, interval]);
 
   const replayScorecard = useMemo(() => {
     const currentPrice = currentReplayCandle?.close ?? 0;
@@ -3529,12 +3745,26 @@ export default function TradingDesk() {
     handleSnapRiskReward,
   ]);
 
-  // Initialize replay starting index when entering replay tab
+  // Initialize replay starting index when entering replay tab or loading a target trade
   useEffect(() => {
-    if (view === "replay" && market?.candles?.length && replayIndex === 0) {
-      setReplayIndex(Math.max(0, market.candles.length - 25));
+    if (view === "replay" && market?.candles?.length) {
+      if (replayTargetTrade && market.symbol === replayTargetTrade.symbol) {
+        let closestIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < market.candles.length; i++) {
+          const diff = Math.abs(market.candles[i].time - replayTargetTrade.openedAt);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = i;
+          }
+        }
+        const setupIdx = Math.max(0, closestIdx - 25);
+        setReplayIndex(setupIdx);
+      } else if (replayIndex === 0) {
+        setReplayIndex(Math.max(0, market.candles.length - 25));
+      }
     }
-  }, [view, market?.candles?.length, replayIndex]);
+  }, [view, market?.candles?.length, market?.symbol, replayTargetTrade?.id]);
 
   // Pause playback and clear cut mode when switching views
   useEffect(() => {
@@ -5122,6 +5352,75 @@ export default function TradingDesk() {
                     }}
                   />
                 ) : null}
+                {backtest.trades.length > 0 && (() => {
+                  const bestTrade = [...backtest.trades].sort((a, b) => b.pnl - a.pnl)[0];
+                  const worstTrade = [...backtest.trades].sort((a, b) => a.pnl - b.pnl)[0];
+                  return (
+                    <div className="backtest-trade-highlights" aria-label="Trade replay highlights">
+                      {bestTrade && (
+                        <div className="panel backtest-highlight-card is-best">
+                          <div className="highlight-header">
+                            <span className="highlight-badge is-best">Best Simulated Trade</span>
+                            <span className="highlight-time">{formatDate(bestTrade.entryAt)}</span>
+                          </div>
+                          <div className="highlight-body">
+                            <div className="highlight-stat-main">
+                              <strong className="tone-up">+{bestTrade.returnPct.toFixed(2)}%</strong>
+                              <small className="tone-up">+{formatMoney(bestTrade.pnl)}</small>
+                            </div>
+                            <div className="highlight-meta-grid">
+                              <div><span>Entry</span><strong>${formatPrice(bestTrade.entryPrice)}</strong></div>
+                              <div><span>Exit</span><strong>${formatPrice(bestTrade.exitPrice)}</strong></div>
+                              <div><span>Holding</span><strong>{bestTrade.barsHeld} bar{bestTrade.barsHeld === 1 ? "" : "s"}</strong></div>
+                            </div>
+                          </div>
+                          <div className="highlight-footer">
+                            <button
+                              type="button"
+                              className="button button-secondary highlight-replay-btn"
+                              onClick={() => replayFromBacktestTrade(bestTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                              title="Replay this best trade bar-by-bar in Trade Replay Studio"
+                            >
+                              <Icon name="replay" size={13} />
+                              <span>Replay Best Trade</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {worstTrade && worstTrade.pnl < 0 && (
+                        <div className="panel backtest-highlight-card is-worst">
+                          <div className="highlight-header">
+                            <span className="highlight-badge is-worst">Max Drawdown Trade</span>
+                            <span className="highlight-time">{formatDate(worstTrade.entryAt)}</span>
+                          </div>
+                          <div className="highlight-body">
+                            <div className="highlight-stat-main">
+                              <strong className="tone-down">{worstTrade.returnPct.toFixed(2)}%</strong>
+                              <small className="tone-down">{formatMoney(worstTrade.pnl)}</small>
+                            </div>
+                            <div className="highlight-meta-grid">
+                              <div><span>Entry</span><strong>${formatPrice(worstTrade.entryPrice)}</strong></div>
+                              <div><span>Exit</span><strong>${formatPrice(worstTrade.exitPrice)}</strong></div>
+                              <div><span>Holding</span><strong>{worstTrade.barsHeld} bar{worstTrade.barsHeld === 1 ? "" : "s"}</strong></div>
+                            </div>
+                          </div>
+                          <div className="highlight-footer">
+                            <button
+                              type="button"
+                              className="button button-secondary highlight-replay-btn"
+                              onClick={() => replayFromBacktestTrade(worstTrade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                              title="Inspect what broke during this drawdown trade in Trade Replay Studio"
+                            >
+                              <Icon name="replay" size={13} />
+                              <span>Replay Drawdown Trade</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <section className="panel trade-log">
                   <div className="panel-heading">
                     <div>
@@ -5164,6 +5463,7 @@ export default function TradingDesk() {
                             <th style={{ textAlign: "right" }}>Return</th>
                             <th style={{ textAlign: "right" }}>Net P&amp;L</th>
                             <th style={{ textAlign: "center" }}>Duration</th>
+                            <th style={{ textAlign: "center" }}>Action</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5207,6 +5507,17 @@ export default function TradingDesk() {
                                   </td>
                                   <td style={{ textAlign: "center" }}>
                                     <span className="bars-held-pill">{trade.barsHeld} bar{trade.barsHeld === 1 ? "" : "s"}</span>
+                                  </td>
+                                  <td style={{ textAlign: "center" }}>
+                                    <button
+                                      type="button"
+                                      className="backtest-replay-row-btn"
+                                      onClick={() => replayFromBacktestTrade(trade, backtest.symbol, backtest.interval, backtest.strategy?.summary || strategyPrompt)}
+                                      title="Replay this simulated trade on chart"
+                                    >
+                                      <Icon name="replay" size={12} />
+                                      <span>Replay</span>
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -5405,6 +5716,72 @@ export default function TradingDesk() {
                 </div>
               </div>
 
+              {/* Dedicated Historical Trade Review HUD Strip (when entering replay from a closed paper trade or backtest trade) */}
+              {replayTargetTrade && (
+                <div className="replay-review-hud" role="region" aria-label="Historical Trade Review Context">
+                  <div className="replay-review-hud-left">
+                    <span className="replay-review-tag">
+                      <Icon name="replay" size={13} />
+                      <span>{replayTargetTrade.origin === "paper" ? "Paper Review" : "Backtest Review"}</span>
+                    </span>
+                    <strong className="replay-review-symbol">{replayTargetTrade.symbol}</strong>
+                    <span className={`replay-review-side ${replayTargetTrade.side === "buy" ? "is-long" : "is-short"}`}>
+                      {replayTargetTrade.side === "buy" ? "LONG" : "SHORT"}
+                    </span>
+                    <span className="replay-review-metric">
+                      Entry: <strong>${formatPrice(replayTargetTrade.entryPrice)}</strong>
+                    </span>
+                    <span className="replay-review-metric">
+                      Exit: <strong>${formatPrice(replayTargetTrade.exitPrice)}</strong>
+                    </span>
+                    <span className={`replay-review-pnl ${replayTargetTrade.netPnl >= 0 ? "tone-up" : "tone-down"}`}>
+                      {replayTargetTrade.netPnl >= 0 ? "+" : ""}{formatMoney(replayTargetTrade.netPnl)} ({replayTargetTrade.returnPct >= 0 ? "+" : ""}{replayTargetTrade.returnPct.toFixed(2)}%)
+                    </span>
+                    {replayTargetTrade.strategyLabel && (
+                      <span className="replay-review-strategy" title={replayTargetTrade.strategyLabel}>
+                        {replayTargetTrade.strategyLabel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="replay-review-hud-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary replay-hud-action-btn"
+                      onClick={handleJumpToSetup}
+                      title="Rewind to 25 bars before trade entry to inspect setup formation"
+                    >
+                      <Icon name="history" size={13} />
+                      <span>Setup (-25b)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary replay-hud-action-btn"
+                      onClick={handleJumpToEntry}
+                      title="Jump directly to entry bar"
+                    >
+                      <span>Entry Bar</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary replay-hud-action-btn"
+                      onClick={handleJumpToExit}
+                      title="Jump directly to exit bar"
+                    >
+                      <span>Exit Bar</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary replay-hud-exit-btn"
+                      onClick={handleExitTradeReview}
+                      title={`Return to ${replayTargetTrade.origin === "paper" ? "Paper Review" : "Backtests"}`}
+                    >
+                      <Icon name="close" size={13} />
+                      <span>Return to {replayTargetTrade.origin === "paper" ? "Paper Review" : "Backtests"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Main 2-Column Replay Studio Grid */}
               <div className="replay-studio-grid">
                 {/* Left Column: Price Chart + Docked Light Studio Transport Console */}
@@ -5442,6 +5819,14 @@ export default function TradingDesk() {
                         replayBrackets={replayBracketsConfig}
                         replayTrades={replayWallet.closedTrades}
                         activePosition={replayWallet.position}
+                        targetTradeReference={replayTargetTrade ? {
+                          entryPrice: replayTargetTrade.entryPrice,
+                          exitPrice: replayTargetTrade.exitPrice,
+                          side: replayTargetTrade.side,
+                          netPnl: replayTargetTrade.netPnl,
+                          returnPct: replayTargetTrade.returnPct,
+                          label: replayTargetTrade.origin === "paper" ? "Paper Trade" : "Backtest Trade",
+                        } : null}
                         onCutCandle={(candle) => {
                           if (!market) return;
                           const idx = market.candles.findIndex((c) => c.time === candle.time);
@@ -6258,7 +6643,22 @@ export default function TradingDesk() {
                           <span className="paper-review-entry-title"><strong>{trade.symbol}</strong><small>{formatDate(trade.closedAt)} · {strategy}</small></span>
                           <span className="paper-review-entry-data"><small>{trade.quantity.toFixed(6)} units</small><small>{formatMoney(trade.entryPrice)} to {formatMoney(trade.exitPrice)}</small></span>
                           <span className={`paper-review-entry-result ${trade.netPnl >= 0 ? "tone-up" : "tone-down"}`}><strong>{formatMoney(trade.netPnl)}</strong><small>{formatPercent(trade.returnPct)} net</small></span>
-                          <span className="paper-review-entry-toggle">Details <Icon name="chevronDown" size={12} /></span>
+                          <span className="paper-review-entry-actions">
+                            <button
+                              type="button"
+                              className="paper-replay-quick-btn"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                replayFromPaperTrade(trade);
+                              }}
+                              title="Replay this trade bar-by-bar on the chart"
+                            >
+                              <Icon name="replay" size={12} />
+                              <span>Replay</span>
+                            </button>
+                            <span className="paper-review-entry-toggle">Details <Icon name="chevronDown" size={12} /></span>
+                          </span>
                         </summary>
                         <div className="paper-review-detail-body">
                           <div className="paper-review-detail-grid">
@@ -6272,6 +6672,17 @@ export default function TradingDesk() {
                             <div><span>Net P&amp;L</span><strong className={trade.netPnl >= 0 ? "tone-up" : "tone-down"}>{formatMoney(trade.netPnl)}</strong></div>
                           </div>
                           {trade.estimatedFees ? <p className="paper-review-legacy-fee">This close uses the current fee assumption for one or more older fills that did not save a fee rate.</p> : null}
+                          <div className="paper-review-actions-bar">
+                            <button
+                              type="button"
+                              className="button button-secondary paper-replay-handoff-btn"
+                              onClick={() => replayFromPaperTrade(trade)}
+                              title={`Replay ${trade.symbol} trade bar-by-bar on the chart`}
+                            >
+                              <Icon name="replay" size={13} />
+                              <span>Replay trade on chart</span>
+                            </button>
+                          </div>
                           {(relatedResearch.length > 0 || trade.backtestRefs.length > 0 || trade.playbookNames.length > 0) ? <div className="paper-review-sources">
                             <h3>Entry context</h3>
                             {trade.playbookNames.map((name) => <p key={name}><strong>Playbook:</strong> {name}</p>)}

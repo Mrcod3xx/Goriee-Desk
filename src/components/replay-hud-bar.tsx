@@ -24,6 +24,23 @@ interface ReplayHudBarProps {
   onQuickSell: (amountUsd: number) => void;
   onClosePosition: () => void;
   onExitReplay: () => void;
+  targetTrade?: {
+    id: string;
+    symbol: string;
+    openedAt: number;
+    closedAt: number;
+    entryPrice: number;
+    exitPrice: number;
+    netPnl: number;
+    returnPct: number;
+    side: "buy" | "sell";
+    origin: "paper" | "backtests";
+    strategyLabel?: string;
+  } | null;
+  onJumpToSetup?: () => void;
+  onJumpToEntry?: () => void;
+  onJumpToExit?: () => void;
+  onExitReview?: () => void;
 }
 
 export function ReplayHudBar({
@@ -45,6 +62,11 @@ export function ReplayHudBar({
   onQuickSell,
   onClosePosition,
   onExitReplay,
+  targetTrade,
+  onJumpToSetup,
+  onJumpToEntry,
+  onJumpToExit,
+  onExitReview,
 }: ReplayHudBarProps) {
   const currentPrice = currentCandle?.close || 0;
   const equity = useMemo(
@@ -74,80 +96,158 @@ export function ReplayHudBar({
   }, [currentCandle?.time]);
 
   return (
-    <div className="replay-hud-bar" role="region" aria-label="Trade Replay Controls">
-      {/* Left Group: Replay Mode Badge, Cut Tool, and Quick Rewind */}
-      <div className="replay-left-group">
-        <div className="replay-mode-badge">
-          <span className="replay-pulse-dot" />
-          <span className="replay-badge-title">Replay Mode</span>
-        </div>
-
-        <button
-          type="button"
-          className={`replay-btn replay-cut-btn ${isCutMode ? "is-active" : ""}`}
-          onClick={onToggleCutMode}
-          title={isCutMode ? "Cut mode active: click a candle on the chart to rewind" : "Click to select a cut point on the chart"}
-          aria-pressed={isCutMode}
-        >
-          <span>{isCutMode ? "Selecting Bar…" : "Cut Bar"}</span>
-        </button>
-
-        <div className="replay-rewind-chips">
-          <button
-            type="button"
-            className="replay-chip"
-            onClick={() => onRewindBars(24)}
-            title="Rewind 24 bars back"
-          >
-            -24b
-          </button>
-          <button
-            type="button"
-            className="replay-chip"
-            onClick={() => onRewindBars(50)}
-            title="Rewind 50 bars back"
-          >
-            -50b
-          </button>
-        </div>
-      </div>
-
-      {/* Center Group: Playback Transport, Speed, and Timeline Scrubber */}
-      <div className="replay-center-group">
-        <div className="replay-transport-controls">
-          <button
-            type="button"
-            className={`replay-play-btn ${isPlaying ? "is-playing" : ""}`}
-            onClick={onTogglePlay}
-            title={isPlaying ? "Pause playback (Space)" : "Play candle tape (Space)"}
-            aria-label={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? "Pause" : "Play"}
-          </button>
-
-          <button
-            type="button"
-            className="replay-step-btn"
-            onClick={onStepForward}
-            title="Advance 1 candle (Right Arrow or F)"
-            aria-label="Step 1 bar forward"
-            disabled={currentIndex >= totalCandles - 1}
-          >
-            ▶|
-          </button>
-
-          <div className="replay-speed-selector" role="group" aria-label="Playback speed">
-            {[0.5, 1, 2, 5].map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`speed-chip ${speed === s ? "is-active" : ""}`}
-                onClick={() => onSpeedChange(s)}
-              >
-                {s}x
-              </button>
-            ))}
+    <div className="replay-hud-container">
+      {targetTrade && (
+        <div className="replay-review-hud" role="region" aria-label="Trade Review Context">
+          <div className="replay-review-hud-left">
+            <span className="replay-review-tag">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polygon points="11 19 2 12 11 5 11 19" />
+                <polygon points="22 19 13 12 22 5 22 19" />
+              </svg>
+              <span>{targetTrade.origin === "paper" ? "Paper Review" : "Backtest Review"}</span>
+            </span>
+            <strong className="replay-review-symbol">{targetTrade.symbol}</strong>
+            <span className={`replay-review-side ${targetTrade.side === "buy" ? "is-long" : "is-short"}`}>
+              {targetTrade.side === "buy" ? "LONG" : "SHORT"}
+            </span>
+            <span className="replay-review-metric">
+              Entry: <strong>${targetTrade.entryPrice.toLocaleString("en-US", { minimumFractionDigits: 2 })}</strong>
+            </span>
+            <span className="replay-review-metric">
+              Exit: <strong>${targetTrade.exitPrice.toLocaleString("en-US", { minimumFractionDigits: 2 })}</strong>
+            </span>
+            <span className={`replay-review-pnl ${targetTrade.netPnl >= 0 ? "tone-up" : "tone-down"}`}>
+              {targetTrade.netPnl >= 0 ? "+" : ""}${targetTrade.netPnl.toFixed(2)} ({targetTrade.returnPct >= 0 ? "+" : ""}{targetTrade.returnPct.toFixed(2)}%)
+            </span>
+            {targetTrade.strategyLabel && (
+              <span className="replay-review-strategy" title={targetTrade.strategyLabel}>
+                {targetTrade.strategyLabel}
+              </span>
+            )}
           </div>
+          <div className="replay-review-hud-actions">
+            {onJumpToSetup && (
+              <button
+                type="button"
+                className="replay-hud-action-btn"
+                onClick={onJumpToSetup}
+                title="Rewind to 25 candles before entry to inspect setup formation"
+              >
+                <span>Setup (-25b)</span>
+              </button>
+            )}
+            {onJumpToEntry && (
+              <button
+                type="button"
+                className="replay-hud-action-btn"
+                onClick={onJumpToEntry}
+                title="Jump directly to entry candle"
+              >
+                <span>Entry Bar</span>
+              </button>
+            )}
+            {onJumpToExit && (
+              <button
+                type="button"
+                className="replay-hud-action-btn"
+                onClick={onJumpToExit}
+                title="Jump directly to exit candle"
+              >
+                <span>Exit Bar</span>
+              </button>
+            )}
+            {onExitReview && (
+              <button
+                type="button"
+                className="replay-hud-exit-btn"
+                onClick={onExitReview}
+                title={`Return to ${targetTrade.origin === "paper" ? "Paper Review" : "Backtests"}`}
+              >
+                <span>Return to {targetTrade.origin === "paper" ? "Paper Review" : "Backtests"}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="replay-hud-bar" role="region" aria-label="Trade Replay Controls">
+        {/* Left Group: Replay Mode Badge, Cut Tool, and Quick Rewind */}
+        <div className="replay-left-group">
+          <div className="replay-mode-badge">
+            <span className="replay-pulse-dot" />
+            <span className="replay-badge-title">Replay Mode</span>
+          </div>
+
+          <button
+            type="button"
+            className={`replay-btn replay-cut-btn ${isCutMode ? "is-active" : ""}`}
+            onClick={onToggleCutMode}
+            title={isCutMode ? "Cut mode active: click a candle on the chart to rewind" : "Click to select a cut point on the chart"}
+            aria-pressed={isCutMode}
+          >
+            <span>{isCutMode ? "Selecting Bar…" : "Cut Bar"}</span>
+          </button>
+
+          <div className="replay-rewind-chips">
+            <button
+              type="button"
+              className="replay-chip"
+              onClick={() => onRewindBars(24)}
+              title="Rewind 24 bars back"
+            >
+              -24b
+            </button>
+            <button
+              type="button"
+              className="replay-chip"
+              onClick={() => onRewindBars(50)}
+              title="Rewind 50 bars back"
+            >
+              -50b
+            </button>
+          </div>
+        </div>
+
+        {/* Center Group: Playback Transport, Speed, and Timeline Scrubber */}
+        <div className="replay-center-group">
+          <div className="replay-transport-controls">
+            <button
+              type="button"
+              className={`replay-play-btn ${isPlaying ? "is-playing" : ""}`}
+              onClick={onTogglePlay}
+              title={isPlaying ? "Pause playback (Space)" : "Play candle tape (Space)"}
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+
+            <button
+              type="button"
+              className="replay-step-btn"
+              onClick={onStepForward}
+              title="Advance 1 candle (Right Arrow or F)"
+              aria-label="Step 1 bar forward"
+              disabled={currentIndex >= totalCandles - 1}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="5 4 15 12 5 20 5 4" />
+                <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              </svg>
+            </button>
+
+            <div className="replay-speed-selector" role="group" aria-label="Playback speed">
+              {[0.5, 1, 2, 5].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`speed-chip ${speed === s ? "is-active" : ""}`}
+                  onClick={() => onSpeedChange(s)}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
         </div>
 
         <div className="replay-timeline-wrap">
@@ -234,5 +334,6 @@ export function ReplayHudBar({
         </button>
       </div>
     </div>
+  </div>
   );
 }

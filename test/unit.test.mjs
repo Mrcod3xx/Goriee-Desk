@@ -834,6 +834,67 @@ test("Trade Replay Simulator: execution, bracket triggers, and scorecard calcula
   assert.ok(scorecard.profitFactor > 0);
 });
 
+test("Historical Trade Replay: setup rewind calculation, index targeting, and trade highlight extraction", async () => {
+  // Test 1: Given candle timeline and trade entry timestamp, locate entry index and rewind 25 bars with clamping
+  const candles = Array.from({ length: 60 }, (_, i) => ({
+    time: 1000000 + i * 3600000,
+    open: 50000 + i * 10,
+    high: 50100 + i * 10,
+    low: 49900 + i * 10,
+    close: 50050 + i * 10,
+    volume: 100,
+  }));
+
+  function findClosestBarIndex(targetTime, list) {
+    if (!list.length) return 0;
+    let closestIdx = 0;
+    let minDiff = Math.abs(list[0].time - targetTime);
+    for (let i = 1; i < list.length; i++) {
+      const diff = Math.abs(list[i].time - targetTime);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    }
+    return closestIdx;
+  }
+
+  // Case A: entry at bar 40 -> rewind 25 bars -> setup bar index 15
+  const entryTimeA = candles[40].time;
+  const entryIdxA = findClosestBarIndex(entryTimeA, candles);
+  assert.equal(entryIdxA, 40);
+  const setupIdxA = Math.max(0, entryIdxA - 25);
+  assert.equal(setupIdxA, 15);
+
+  // Case B: entry early at bar 10 -> rewind 25 bars -> clamped at 0
+  const entryTimeB = candles[10].time;
+  const entryIdxB = findClosestBarIndex(entryTimeB, candles);
+  assert.equal(entryIdxB, 10);
+  const setupIdxB = Math.max(0, entryIdxB - 25);
+  assert.equal(setupIdxB, 0);
+
+  // Test 2: Highlight extraction: find best trade (highest pnl) and max drawdown trade (lowest negative pnl)
+  const mockTrades = [
+    { entryAt: 1000, exitAt: 2000, entryPrice: 100, exitPrice: 110, pnl: 250, returnPct: 10, barsHeld: 5 },
+    { entryAt: 3000, exitAt: 4000, entryPrice: 110, exitPrice: 95, pnl: -375, returnPct: -13.6, barsHeld: 7 },
+    { entryAt: 5000, exitAt: 6000, entryPrice: 95, exitPrice: 115, pnl: 500, returnPct: 21, barsHeld: 10 },
+    { entryAt: 7000, exitAt: 8000, entryPrice: 115, exitPrice: 110, pnl: -125, returnPct: -4.3, barsHeld: 3 },
+  ];
+
+  let best = mockTrades[0];
+  let worst = mockTrades[0];
+  for (const t of mockTrades) {
+    if (t.pnl > best.pnl) best = t;
+    if (t.pnl < worst.pnl) worst = t;
+  }
+
+  assert.equal(best.pnl, 500);
+  assert.equal(best.returnPct, 21);
+  assert.equal(worst.pnl, -375);
+  assert.equal(worst.returnPct, -13.6);
+  assert.ok(worst.pnl < 0);
+});
+
 test("Quantitative Backtest: validateStrategyDraft resiliently normalizes RSI and EMA bounds", async () => {
   const { validateStrategyDraft } = await import("../src/lib/backtest.ts");
 

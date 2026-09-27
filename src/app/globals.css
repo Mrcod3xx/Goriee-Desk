@@ -12456,3 +12456,432 @@ html, body {
   padding-left: 2px;
 }
 
+/* Historical Trade Review HUD Strip (Replay mode handoff) */
+.replay-review-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: #f0f7f3;
+  border: 1px solid #b8d9c6;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(12, 154, 107, 0.08);
+}
+
+.replay-review-hud-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.replay-review-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: #0c9a6b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.replay-review-symbol {
+  font-weight: 750;
+  font-size: 14px;
+  color: #12372c;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-review-side {
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 750;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-review-side.is-long {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.replay-review-side.is-short {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.replay-review-metric {
+  color: #375347;
+  font-size: 12px;
+}
+
+.replay-review-metric strong {
+  color: #12372c;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+
+.replay-review-pnl {
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+
+.replay-review-strategy {
+  padding: 2px 8px;
+  background: #ffffff;
+  border: 1px solid #d2ddd5;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #557364;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-review-hud-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.replay-hud-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #ffffff;
+  border: 1px solid #c2d4c8;
+  color: #1a4235;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-hud-action-btn:hover {
+  background: #e6f3eb;
+  border-color: #0c9a6b;
+  color: #0c9a6b;
+}
+
+.replay-hud-exit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 650;
+  background: #ffffff;
+  border: 1px solid #dc2626;
+  color: #dc2626;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-hud-exit-btn:hover {
+  background: #fef2f2;
+}
+
+/* Backtest Trade Highlights Grid */
+.backtest-trade-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.backtest-highlight-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #ffffff;
+}
+
+.backtest-highlight-card.is-best {
+  border-left: 4px solid #0c9a6b;
+  background: linear-gradient(135deg, rgba(12, 154, 107, 0.04) 0%, #ffffff 100%);
+}
+
+.backtest-highlight-card.is-worst {
+  border-left: 4px solid #dc2626;
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.04) 0%, #ffffff 100%);
+}
+
+.highlight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.highlight-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.highlight-badge.is-best {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.highlight-badge.is-worst {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.highlight-time {
+  font-size: 11px;
+  color: #64748b;
+  font-family: var(--font-mono, monospace);
+}
+
+.highlight-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.highlight-stat-main strong {
+  display: block;
+  font-size: 18px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.highlight-stat-main small {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.highlight-meta-grid {
+  display: flex;
+  gap: 12px;
+  font-size: 11.5px;
+}
+
+.highlight-meta-grid div {
+  display: flex;
+  flex-direction: column;
+}
+
+.highlight-meta-grid span {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.highlight-meta-grid strong {
+  font-family: var(--font-mono, monospace);
+  color: #12372c;
+  font-size: 11.5px;
+}
+
+.highlight-footer {
+  margin-top: auto;
+}
+
+.highlight-replay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* Backtest Table Row Replay Button */
+.backtest-replay-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  background: #f1f5f3;
+  border: 1px solid #d2ddd5;
+  color: #12372c;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.backtest-replay-row-btn:hover {
+  background: #e2ede6;
+  border-color: #0c9a6b;
+  color: #0c9a6b;
+}
+
+/* Paper Review Quick & Handoff Buttons */
+.paper-review-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paper-replay-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  border-radius: 4px;
+  background: #e6f3eb;
+  border: 1px solid #b8d9c6;
+  color: #0c9a6b;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.paper-replay-quick-btn:hover {
+  background: #0c9a6b;
+  color: #ffffff;
+  border-color: #0c9a6b;
+}
+
+.paper-review-actions-bar {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line, #d2ddd5);
+}
+
+.paper-replay-handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+/* Price Chart Target Trade Review Corridor & Lines */
+.chart-target-trade-layer {
+  pointer-events: none;
+}
+
+.target-trade-corridor.is-win {
+  fill: rgba(12, 154, 107, 0.08);
+}
+
+.target-trade-corridor.is-loss {
+  fill: rgba(220, 38, 38, 0.08);
+}
+
+.target-trade-line-entry {
+  stroke: #2563eb;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+.target-trade-line-exit {
+  stroke: #7c3aed;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+/* Right Rail Target Trade Badges */
+.rail-tag-target-entry {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.target-tag-bg-entry {
+  background: #1e3a8a;
+  color: #eff6ff;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 2px 5px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono, monospace);
+  font-size: 8.5px;
+  line-height: 1.15;
+}
+
+.notch-target-entry {
+  color: #3b82f6;
+  font-size: 8px;
+  margin-right: -1px;
+}
+
+.rail-tag-target-exit {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.target-tag-bg-win {
+  background: #064e3b;
+  color: #ecfdf5;
+  border: 1px solid #10b981;
+  border-radius: 4px;
+  padding: 2px 5px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono, monospace);
+  font-size: 8.5px;
+  line-height: 1.15;
+}
+
+.target-tag-bg-loss {
+  background: #7f1d1d;
+  color: #fef2f2;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  padding: 2px 5px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono, monospace);
+  font-size: 8.5px;
+  line-height: 1.15;
+}
+
+.notch-target-exit {
+  color: #8b5cf6;
+  font-size: 8px;
+  margin-right: -1px;
+}
+
