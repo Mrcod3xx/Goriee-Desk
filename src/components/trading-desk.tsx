@@ -32,6 +32,10 @@ import { ReplayScorecardModal } from "@/components/replay-scorecard-modal";
 import type { View, ScannerSort, ScannerAssetType, Report, JournalItem, PaperResearchRef, PaperBacktestRef, PaperTrade, ClosedPaperTrade, PaperLedgerPosition, Quote, OpenPaperPosition, PaperAlert, PaperBracket, StrategyPlaybook, Instrument, BacktestResult, ReplayBracketConfig, ReplayTargetTrade } from "@/components/desk-types";
 import { DEFAULT_WATCHLIST, STARTING_CASH, STARTER_PLAYBOOKS, supportsBacktestWindow, storageKeys, formatPrice, formatScannerPrice, formatMoney, formatPercent, formatCompact, formatDuration, tradeStrategyLabel, formatDate, researchErrorMessage, safeRead } from "@/components/desk-shared";
 import { Icon } from "@/components/desk-icon";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { safeRemove, safeWrite, safeWriteJson, subscribeToStorageFailures, registerQuotaRelief } from "@/lib/safe-storage";
+import type { StorageFailureReason } from "@/lib/safe-storage";
+import { relieveStorageQuota, describeDroppedStores } from "@/lib/storage-relief";
 import { PriceChart } from "@/components/price-chart";
 import { CumulativePnlChart, Stat, EquityChart } from "@/components/desk-charts";
 import { ReportPanel, CitationList, ModelReadiness, ResearchLoadingStatus, ResearchLoadingSkeleton, BacktestLoadingStatus } from "@/components/research-panels";
@@ -139,13 +143,14 @@ export default function TradingDesk() {
   const aiRetryAt = aiRetryAtState;
   const setAiRetryAt = (timestamp: number) => {
     setAiRetryAtState(timestamp);
-    try {
-      if (timestamp > Date.now()) {
-        window.localStorage.setItem(storageKeys.aiCooldown, String(timestamp));
-      } else {
-        window.localStorage.removeItem(storageKeys.aiCooldown);
-      }
-    } catch {}
+    // The cooldown is a convenience, not the source of truth: aiRetryAtState
+    // already holds it for this session. A failure here must never escape into
+    // the click handler that called us.
+    if (timestamp > Date.now()) {
+      safeWrite(storageKeys.aiCooldown, String(timestamp));
+    } else {
+      safeRemove(storageKeys.aiCooldown);
+    }
   };
   const [clockNow, setClockNow] = useState(Date.now());
   useEffect(() => {
@@ -318,8 +323,61 @@ export default function TradingDesk() {
   }, []);
 
   useEffect(() => {
+    // Persisted state is a convenience layer, never the session source of truth:
+    // everything on screen already lives in React state. So a storage failure
+    // must degrade to a toast rather than escape into whichever handler or
+    // setState updater triggered the write.
+    //
+    // safeWrite is called from inside several setState updaters (the bracket and
+    // ledger writes), so both paths below must never touch React state
+    // synchronously — a setState from within an updater is a render-phase
+    // update. Deferring to a macrotask lands the toast outside the updater,
+    // which is also how the existing auto-dismiss timer works.
+    const showStorageToast = (message: string) => {
+      window.setTimeout(() => setToastMessage(message), 0);
+    };
+
+    // The relief handler runs synchronously *inside* safeWrite, so the retry
+    // that follows it can succeed in the same call. Only stores that are safe to
+    // discard are eligible; the paper ledger and bracket state are deliberately
+    // excluded, because truncating them would silently change the account
+    // balance or remove a stop the user believes is protecting them.
+    registerQuotaRelief(() => {
+      const outcome = relieveStorageQuota(window.localStorage);
+      if (outcome.dropped.length > 0) {
+        // Surface this even when the retry goes on to succeed. Otherwise the
+        // user's copilot transcripts and saved reports would vanish with no
+        // explanation, which is far worse than the full-storage error itself.
+        showStorageToast(
+          `Local storage was full, so ${describeDroppedStores(outcome.dropped)} were cleared to keep the desk working. Your paper account and playbooks are untouched.`,
+        );
+      }
+      return outcome.relieved;
+    });
+
+    const unsubscribe = subscribeToStorageFailures((reason: StorageFailureReason) => {
+      if (reason === "quota") {
+        showStorageToast("Local storage is still full, so this change was not saved. It remains active for this session.");
+        return;
+      }
+      if (reason === "unavailable") {
+        showStorageToast("This browser is blocking local storage, so nothing will be saved between visits.");
+        return;
+      }
+      showStorageToast("Could not save that change to local storage. It remains active for this session.");
+    });
+
+    return () => {
+      unsubscribe();
+      registerQuotaRelief(null);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!draftsReady) return;
-    try { window.localStorage.setItem("goriee.drafts.v1", JSON.stringify({ question, strategy: strategyPrompt })); } catch { /* Inputs remain available in the current session. */ }
+    // Re-saved on every keystroke, so this is the first write to hit a full
+    // store and the best place for the user to learn about it.
+    safeWriteJson(storageKeys.drafts, { question, strategy: strategyPrompt });
   }, [draftsReady, question, strategyPrompt]);
 
   useEffect(() => {
@@ -718,7 +776,7 @@ export default function TradingDesk() {
     const hitIds = new Set(hits.map((alert) => alert.id));
     const next = paperAlerts.map((alert) => hitIds.has(alert.id) ? { ...alert, triggeredAt: Date.now() } : alert);
     setPaperAlerts(next);
-    window.localStorage.setItem(storageKeys.paperAlerts, JSON.stringify(next));
+    safeWriteJson(storageKeys.paperAlerts, next);
     const labels = hits.slice(0, 2).map((alert) => `${alert.symbol} ${alert.direction} ${formatPrice(alert.price)}`).join(" · ");
     setPaperMessage(`Paper alert reached: ${labels}${hits.length > 2 ? ` · +${hits.length - 2} more` : ""}`);
     window.setTimeout(() => setPaperMessage(""), 6000);
@@ -753,7 +811,7 @@ export default function TradingDesk() {
         } else if (peak > (bracket.peakPrice || 0)) {
           setPaperBrackets((prev) => {
             const next = { ...prev, [pos.symbol]: { ...bracket, peakPrice: peak } };
-            window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+            safeWriteJson(storageKeys.paperBrackets, next);
             return next;
           });
         }
@@ -878,7 +936,7 @@ export default function TradingDesk() {
     }
     const next = [asset, ...watchlist];
     setWatchlist(next);
-    window.localStorage.setItem(storageKeys.watchlist, JSON.stringify(next));
+    safeWriteJson(storageKeys.watchlist, next);
     setPaperMessage(`${asset} added to your watchlist.`);
     window.setTimeout(() => setPaperMessage(""), 2500);
   }
@@ -893,7 +951,7 @@ export default function TradingDesk() {
   function removeFromWatchlist(asset: string) {
     const next = watchlist.filter((entry) => entry !== asset);
     setWatchlist(next);
-    window.localStorage.setItem(storageKeys.watchlist, JSON.stringify(next));
+    safeWriteJson(storageKeys.watchlist, next);
   }
 
   function addPaperAlert(event: React.FormEvent<HTMLFormElement>) {
@@ -915,7 +973,7 @@ export default function TradingDesk() {
     };
     const next = [alert, ...paperAlerts];
     setPaperAlerts(next);
-    window.localStorage.setItem(storageKeys.paperAlerts, JSON.stringify(next));
+    safeWriteJson(storageKeys.paperAlerts, next);
     setAlertPrice("");
     setPaperMessage(`${alert.symbol} ${alert.direction} ${formatPrice(alert.price)} alert added.`);
     window.setTimeout(() => setPaperMessage(""), 3500);
@@ -924,7 +982,7 @@ export default function TradingDesk() {
   function removePaperAlert(id: string) {
     const next = paperAlerts.filter((alert) => alert.id !== id);
     setPaperAlerts(next);
-    window.localStorage.setItem(storageKeys.paperAlerts, JSON.stringify(next));
+    safeWriteJson(storageKeys.paperAlerts, next);
   }
 
   function saveCurrentPlaybook() {
@@ -946,7 +1004,7 @@ export default function TradingDesk() {
     };
     const next = [item, ...playbooks].slice(0, 30);
     setPlaybooks(next);
-    window.localStorage.setItem(storageKeys.playbooks, JSON.stringify(next));
+    safeWriteJson(storageKeys.playbooks, next);
     setPlaybookName("");
     setPlaybookMessage(`“${item.name}” saved to your Playbooks library.`);
     window.setTimeout(() => setPlaybookMessage(""), 3500);
@@ -955,10 +1013,10 @@ export default function TradingDesk() {
   function deletePlaybook(id: string) {
     const next = playbooks.filter((playbook) => playbook.id !== id);
     setPlaybooks(next);
-    window.localStorage.setItem(storageKeys.playbooks, JSON.stringify(next));
+    safeWriteJson(storageKeys.playbooks, next);
     if (activePaperPlaybookId === id) {
       setActivePaperPlaybookId("");
-      window.localStorage.removeItem(storageKeys.activePlaybook);
+      safeRemove(storageKeys.activePlaybook);
     }
   }
 
@@ -977,7 +1035,7 @@ export default function TradingDesk() {
     setSymbol(playbook.symbol);
     setInterval(playbook.interval);
     setActivePaperPlaybookId(playbook.id);
-    window.localStorage.setItem(storageKeys.activePlaybook, playbook.id);
+    safeWrite(storageKeys.activePlaybook, playbook.id);
     setPaperTab("account");
     setView("paper");
     setPaperMessage(`“${playbook.name}” is now active in your Paper Desk. Simulated fills on ${playbook.symbol} will be tagged with this playbook.`);
@@ -987,7 +1045,7 @@ export default function TradingDesk() {
   function deactivatePlaybookFromPaper(playbook: StrategyPlaybook) {
     if (activePaperPlaybookId === playbook.id) {
       setActivePaperPlaybookId("");
-      window.localStorage.removeItem(storageKeys.activePlaybook);
+      safeRemove(storageKeys.activePlaybook);
       setPlaybookMessage(`Unpinned “${playbook.name}” from paper trading.`);
       window.setTimeout(() => setPlaybookMessage(""), 3500);
     }
@@ -1059,7 +1117,7 @@ export default function TradingDesk() {
       };
       setJournal((previous) => {
         const next = [item, ...previous.filter((entry) => entry.id !== item.id)].slice(0, 30);
-        window.localStorage.setItem(storageKeys.journal, JSON.stringify(next));
+        safeWriteJson(storageKeys.journal, next);
         return next;
       });
       setView("research");
@@ -1171,10 +1229,10 @@ export default function TradingDesk() {
     };
     if (playbooks.length >= 30) { setBacktestError("Your Playbook library is full. Remove one before saving this study to Paper."); return; }
     const next = [playbook, ...playbooks];
-    window.localStorage.setItem(storageKeys.playbooks, JSON.stringify(next));
+    safeWriteJson(storageKeys.playbooks, next);
     setPlaybooks(next);
     setPaperFeeBps(playbook.feeBps);
-    window.localStorage.setItem(storageKeys.paperFee, JSON.stringify(playbook.feeBps));
+    safeWriteJson(storageKeys.paperFee, playbook.feeBps);
     usePlaybookInPaper(playbook);
     setPaperTab("account");
     setPaperMessage("Backtest saved to a playbook. Its research and result will follow your paper buys into Trade Review. Review the order before recording it.");
@@ -1208,7 +1266,7 @@ export default function TradingDesk() {
           if (!previous[symbol]) return previous;
           const next = { ...previous };
           delete next[symbol];
-          window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+          safeWriteJson(storageKeys.paperBrackets, next);
           return next;
         });
       }
@@ -1256,7 +1314,7 @@ export default function TradingDesk() {
 
       setPaperBrackets((previous) => {
         const next = { ...previous, [symbol]: bracket };
-        window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+        safeWriteJson(storageKeys.paperBrackets, next);
         return next;
       });
     } else if (orderSide === "buy" && !attachBracket) {
@@ -1264,14 +1322,14 @@ export default function TradingDesk() {
         if (!previous[symbol]) return previous;
         const next = { ...previous };
         delete next[symbol];
-        window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+        safeWriteJson(storageKeys.paperBrackets, next);
         return next;
       });
     }
 
     setPaperTrades((previous) => {
       const next = [trade, ...previous];
-      window.localStorage.setItem(storageKeys.paper, JSON.stringify(next));
+      safeWriteJson(storageKeys.paper, next);
       return next;
     });
     setOrderOpen(false);
@@ -1343,14 +1401,14 @@ export default function TradingDesk() {
       };
       setPaperTrades((previous) => {
         const next = [trade, ...previous];
-        window.localStorage.setItem(storageKeys.paper, JSON.stringify(next));
+        safeWriteJson(storageKeys.paper, next);
         return next;
       });
       setPaperBrackets((previous) => {
         if (!previous[asset]) return previous;
         const next = { ...previous };
         delete next[asset];
-        window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+        safeWriteJson(storageKeys.paperBrackets, next);
         return next;
       });
       const grossPnl = (quote.price - position.averageEntry) * position.quantity;
@@ -1370,7 +1428,7 @@ export default function TradingDesk() {
   function updatePaperExitNote(tradeId: string, note: string) {
     setPaperTrades((previous) => {
       const next = previous.map((trade) => trade.id === tradeId ? { ...trade, exitNote: note } : trade);
-      window.localStorage.setItem(storageKeys.paper, JSON.stringify(next));
+      safeWriteJson(storageKeys.paper, next);
       return next;
     });
   }
@@ -1455,12 +1513,12 @@ export default function TradingDesk() {
             if (!previous[targetPlaybook.symbol]) return previous;
             const next = { ...previous };
             delete next[targetPlaybook.symbol];
-            window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+            safeWriteJson(storageKeys.paperBrackets, next);
             return next;
           });
           setPaperTrades((prev) => {
             const next = [trade, ...prev];
-            window.localStorage.setItem(storageKeys.paper, JSON.stringify(next));
+            safeWriteJson(storageKeys.paper, next);
             return next;
           });
           actionTaken = "buy";
@@ -1491,7 +1549,7 @@ export default function TradingDesk() {
 
       setRuleRunnerLogs((prev) => {
         const next = [newLog, ...prev].slice(0, 15);
-        window.localStorage.setItem(storageKeys.ruleRunnerLogs, JSON.stringify(next));
+        safeWriteJson(storageKeys.ruleRunnerLogs, next);
         return next;
       });
     } catch (err) {
@@ -2300,7 +2358,7 @@ export default function TradingDesk() {
     };
     const next = [newPlaybook, ...playbooks];
     setPlaybooks(next);
-    window.localStorage.setItem(storageKeys.playbooks, JSON.stringify(next));
+    safeWriteJson(storageKeys.playbooks, next);
     setView("playbooks");
     setToastMessage(`Playbook "${newPlaybook.name}" saved successfully.`);
   }, [symbol, interval, playbooks]);
@@ -2335,7 +2393,7 @@ export default function TradingDesk() {
     };
     setJournal((prev) => {
       const next = [item, ...prev].slice(0, 50);
-      window.localStorage.setItem(storageKeys.journal, JSON.stringify(next));
+      safeWriteJson(storageKeys.journal, next);
       return next;
     });
     setView("journal");
@@ -2429,6 +2487,16 @@ export default function TradingDesk() {
         </header>
 
         <div className="page-content">
+          {/*
+            One boundary around the whole view-switch region rather than one per
+            tab: the views are mutually exclusive, so only one branch ever
+            renders at a time and a single boundary isolates a crash exactly as
+            well as nine would. resetKey={view} means switching tabs clears a
+            caught error, so a user who lands on a broken view can click any
+            other tab and keep working. Header, nav and footer stay mounted
+            either way.
+          */}
+          <ErrorBoundary label="This view" resetKey={view}>
           {view === "desk" ? (
             <>
               <div className="page-heading desk-heading">
@@ -5072,7 +5140,7 @@ export default function TradingDesk() {
                                   };
                                   const next = [item, ...playbooks].slice(0, 30);
                                   setPlaybooks(next);
-                                  window.localStorage.setItem(storageKeys.playbooks, JSON.stringify(next));
+                                  safeWriteJson(storageKeys.playbooks, next);
                                   setPlaybookMessage(`“${item.name}” added to your Playbook Library.`);
                                   window.setTimeout(() => setPlaybookMessage(""), 3500);
                                 }}
@@ -5111,7 +5179,7 @@ export default function TradingDesk() {
                     <label className="paper-review-search"><span>Search reviews</span><input type="search" value={paperReviewSearch} onChange={(event) => setPaperReviewSearch(event.target.value)} placeholder="Token, strategy, or note" /></label>
                     <label><span>Market</span><select value={paperReviewSymbol} onChange={(event) => setPaperReviewSymbol(event.target.value)}><option value="all">All markets</option>{[...new Set(closedPaperTrades.map((trade) => trade.symbol))].sort().map((asset) => <option key={asset}>{asset}</option>)}</select></label>
                     <label><span>Strategy</span><select value={paperReviewStrategy} onChange={(event) => setPaperReviewStrategy(event.target.value)}><option value="all">All strategies</option>{paperReviewStrategies.map((strategy) => <option key={strategy}>{strategy}</option>)}</select></label>
-                    <label><span>Fee assumption · bps / fill</span><input type="number" min="0" max="1000" step="1" value={paperFeeBps} onChange={(event) => { const nextFee = Math.max(0, Math.min(1000, Number(event.target.value) || 0)); setPaperFeeBps(nextFee); window.localStorage.setItem(storageKeys.paperFee, JSON.stringify(nextFee)); }} /></label>
+                    <label><span>Fee assumption · bps / fill</span><input type="number" min="0" max="1000" step="1" value={paperFeeBps} onChange={(event) => { const nextFee = Math.max(0, Math.min(1000, Number(event.target.value) || 0)); setPaperFeeBps(nextFee); safeWriteJson(storageKeys.paperFee, nextFee); }} /></label>
                   </section>
                   <p className="paper-review-method">Net results subtract estimated entry and exit fees. New fills save their fee assumption; older fills without one use the setting above. Paper fills do not model spread, slippage, or taxes.</p>
                   <CumulativePnlChart trades={filteredPaperReviews} />
@@ -5278,7 +5346,7 @@ export default function TradingDesk() {
                       className="button button-secondary"
                       onClick={() => {
                         setActivePaperPlaybookId("");
-                        window.localStorage.removeItem(storageKeys.activePlaybook);
+                        safeRemove(storageKeys.activePlaybook);
                         setPaperMessage(`Deactivated “${activePaperPlaybook.name}” from paper trading.`);
                         window.setTimeout(() => setPaperMessage(""), 3500);
                       }}
@@ -5312,7 +5380,7 @@ export default function TradingDesk() {
                       onClick={() => {
                         const next = !ruleRunnerActive;
                         setRuleRunnerActive(next);
-                        window.localStorage.setItem(storageKeys.autoRuleRunner, JSON.stringify(next));
+                        safeWriteJson(storageKeys.autoRuleRunner, next);
                         setToastMessage(next ? "Automated Rule Runner activated." : "Automated Rule Runner paused.");
                       }}
                       style={{ padding: "0.45rem 0.9rem", fontSize: "0.82rem" }}
@@ -5360,7 +5428,7 @@ export default function TradingDesk() {
                         type="button"
                         onClick={() => {
                           setRuleRunnerLogs([]);
-                          window.localStorage.removeItem(storageKeys.ruleRunnerLogs);
+                          safeRemove(storageKeys.ruleRunnerLogs);
                         }}
                         style={{ background: "none", border: "none", fontSize: "0.76rem", color: "var(--text-muted)", cursor: "pointer", textDecoration: "underline" }}
                       >
@@ -5454,7 +5522,7 @@ export default function TradingDesk() {
                     <span>Realized loss limit</span>
                     <div>
                       <span>$</span>
-                      <input id="paper-loss-limit" type="number" min="1" max="100000" step="25" value={dailyLossLimit} onChange={(event) => { const value = Math.max(1, Math.min(100000, Number(event.target.value) || 1)); setDailyLossLimit(value); window.localStorage.setItem(storageKeys.paperRisk, JSON.stringify(value)); }} />
+                      <input id="paper-loss-limit" type="number" min="1" max="100000" step="25" value={dailyLossLimit} onChange={(event) => { const value = Math.max(1, Math.min(100000, Number(event.target.value) || 1)); setDailyLossLimit(value); safeWriteJson(storageKeys.paperRisk, value); }} />
                       <span>USDT / UTC day</span>
                     </div>
                   </label>
@@ -6016,6 +6084,7 @@ export default function TradingDesk() {
             </>
           ) : null}
           {view === "settings" ? <><ProviderSettings /><WorkspaceBackup /></> : null}
+          </ErrorBoundary>
         </div>
         <footer className="app-footer"><span>Goriee AI Desk</span><span>Research support · not financial advice</span><span>Bitget public market data</span></footer>
       </section>
@@ -6316,7 +6385,7 @@ export default function TradingDesk() {
                   setPaperBrackets((prev) => {
                     const next = { ...prev };
                     delete next[editingBracketSymbol];
-                    window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+                    safeWriteJson(storageKeys.paperBrackets, next);
                     return next;
                   });
                   setEditingBracketSymbol(null);
@@ -6349,7 +6418,7 @@ export default function TradingDesk() {
 
                   setPaperBrackets((prev) => {
                     const next = { ...prev, [editingBracketSymbol]: nextBracket };
-                    window.localStorage.setItem(storageKeys.paperBrackets, JSON.stringify(next));
+                    safeWriteJson(storageKeys.paperBrackets, next);
                     return next;
                   });
                   setEditingBracketSymbol(null);

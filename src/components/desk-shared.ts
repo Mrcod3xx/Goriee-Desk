@@ -58,6 +58,14 @@ export const storageKeys = {
   autoRuleRunner: "goriee.auto-rule-runner.v1",
   ruleRunnerLogs: "goriee.rule-runner-logs.v1",
   aiCooldown: "goriee.ai-cooldown.v1",
+  /** In-progress research/strategy input text, re-saved on every keystroke. */
+  drafts: "goriee.drafts.v1",
+  /**
+   * Copilot transcripts. Note the underscore-separated spelling: it predates the
+   * dotted convention used by every other key, and renaming it would orphan the
+   * chat history already saved in users' browsers.
+   */
+  copilotSessions: "goriee_copilot_sessions_v1",
 };
 
 export function formatPrice(value: number) {
