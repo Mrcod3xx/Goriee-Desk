@@ -522,7 +522,13 @@ All 13 keys above are covered by the workspace backup allowlist in `src/lib/work
   - **Design note:** the client timeout is deliberately 280s, not 300s, so our own `AbortSignal` fires first and the UI shows a readable error rather than a raw platform 504.
   - **Clarification for future agents:** reasoning is NOT forced by Vercel and cannot be "removed" via config — the slowness is inherent to the GLM reasoning model on NVIDIA's free tier. Most calls still finish in 20–60s; the raised ceiling only prevents premature cutoffs.
 - **Verification:** `node node_modules\next\dist\bin\next build` clean (11 routes); deploy Ready in 28s and aliased; post-deploy smoke test POST `/api/research` → **HTTP 200 in 22s** with a real report.
-- **Uncommitted at end of session:** the 3 API route files, `src/lib/llm.ts`, `.gitignore` (duplicate `.env*` line removed, `.vercel/` normalized), plus new `TODO.md`. The live site is unaffected (CLI deploys, not git), but the repo no longer matches production.
+  - ⚠️ **CORRECTED 2026-09-28 (later same day):** the claim that the 300s/280s timeout change was "deployed and smoke-tested" was **wrong**, and the 22s smoke test did **not** validate it. Timeline proved from file mtimes vs the deploy's `created` timestamp:
+    - Production deploy `dpl_32CfrN8v3eEPV9jzzV9NPSafEphU` created **16:53:57 +0800**
+    - `src/lib/llm.ts` + the 3 API routes last written **17:01:16 +0800** → **8 minutes AFTER** the deploy
+    - The six split files (`trading-desk.tsx`, `desk-*.ts(x)`, `price-chart.tsx`, `research-panels.tsx`) written **16:00:27 +0800** → 53 min *before*, so the split **was** in that build
+  - So the live site between 16:53 and 18:56 ran the split but **not** the timeout ceiling. Lesson: never report a change as deployed from memory — compare the deploy's `created` field against `git log --format=%ci` or file mtimes.
+  - ✅ **Resolved by redeploy:** `dpl_87KVXV7cAj3dgvwqeyaAQpvLY5S5` (see §25) is the first build that actually contains `maxDuration = 300` and the 280s abort.
+- **Uncommitted at end of session:** the 3 API route files, `src/lib/llm.ts`, `.gitignore` (duplicate `.env*` line removed, `.vercel/` normalized), plus new `TODO.md`. The live site is unaffected (CLI deploys, not git), but the repo no longer matches production. → ✅ **Superseded: all committed on 2026-09-28** (`a4d87fd`, `ef9e6da`, `6f0010a`) and pushed to `origin/main`; tree is clean.
 - **PowerShell gotchas hit repeatedly:** `vercel` writes its version banner to stderr → benign `NativeCommandError` noise; long commands often swallow inline output → redirect to `$env:TEMP\*.txt` and read after; a stuck continuation prompt recovers with a plain `probe` command. Execution policy blocks npm/npx shims → invoke `node node_modules\next\dist\bin\next build` directly.
 - **Fluid compute note:** deployments bundle ALL functions into one lambda (`lambdas.Count == 1`, entrypoint `.`), so per-route `maxDuration` is not inspectable via `/v13/deployments/<dpl_id>`. Also, `vercel api` requires the `dpl_`-prefixed ID — the short ID from the deploy URL returns 404.
 
@@ -555,7 +561,7 @@ Ran a read-only review of the app's *current* state (no edits) to find what else
 So ~2,650 lines had been extracted out of the monolith into six new files. **At review time those six files were untracked in git while the live Vercel deployment had been built from this exact tree** — the repo did not match production and a careless `git checkout .` would have destroyed the extraction. **RESOLVED 2026-09-28: all committed and pushed.** Three logical commits:
 - **`a4d87fd`** `perf(api): raise LLM route timeouts to the Vercel Hobby ceiling` — `.gitignore`, `src/lib/llm.ts`, and the 3 API routes
 - **`ef9e6da`** `refactor(desk): extract ~2,650 lines out of the trading-desk monolith` — the 6 new components + `trading-desk.tsx`
-- docs commit — `TODO.md` + `PROJECT_MEMORY.md`
+- **`6f0010a`** docs commit — `TODO.md` + `PROJECT_MEMORY.md`
 
 Safety gate run before committing the split: `tsc --noEmit` clean, and `node --test` on the 6 suite files → **54 tests / 53 pass / 0 fail / 1 skipped** (the skip is the opt-in live-AI test gated on `GORIEE_RUN_LIVE_AI_TESTS=1`).
 
@@ -592,5 +598,32 @@ Safety gate run before committing the split: `tsc --noEmit` clean, and `node --t
 **Good news confirmed during the review (don't "fix" these):** accessibility baseline is solid — 26 `role="alert"` / `role="status"` / `aria-live` usages across 8 files, `.visually-hidden` defined (`globals.css:3458`) and used, error banners have "Try again" buttons (`:2482`, `:2720`). Zero real `TODO`/`FIXME`/`HACK` markers in the codebase (the 38 grep hits were all `placeholder=` attributes and `::placeholder` CSS).
 
 **Recommended sequencing:** items **6, 7, 8, 11** are small and independent — land them before the big monolith split. Items **9, 10, 12** interact with the refactor, so sequence them *with* TODO item 2 rather than before it.
+
+## 📝 25. Commits Pushed + Redeploy That Actually Shipped the Timeout Fix (September 28, 2026)
+
+**Git:** the previously-uncommitted work is now committed on `main` and pushed to `origin`. Three logical commits on top of `4fcb674`:
+
+| Commit | Subject | Files | Stat |
+|---|---|---|---|
+| `a4d87fd` | `perf(api): raise LLM route timeouts to the Vercel Hobby ceiling` | `.gitignore`, `src/lib/llm.ts`, 3 API routes | 5 files, +21/−1 |
+| `ef9e6da` | `refactor(desk): extract ~2,650 lines out of the trading-desk monolith` | `trading-desk.tsx` + 6 new modules | 7 files, +2669/−2654 |
+| `6f0010a` | `docs: add refinement backlog (TODO items 6-13)` | `TODO.md`, `PROJECT_MEMORY.md` | 2 files, +191/−3 |
+
+**Backup branches on `origin`** (rollback points on both sides of the split):
+- `backup/2026-09-28` → `4fcb674` (pre-split monolith)
+- `backup/2026-09-28-post-split` → `6f0010a` (current state)
+- Local-only `backup-before-reset` → `4fcb674` (never pushed)
+
+**Deploy:** `vercel deploy --prod --yes` → **`dpl_87KVXV7cAj3dgvwqeyaAQpvLY5S5`**, created 18:56:03 +0800, build 16s, `Ready`, aliased to https://goriee-ai-desk.vercel.app. **This is the first production build containing `maxDuration = 300` and the 280s LLM abort** — the earlier `dpl_32CfrN8v3eEPV9jzzV9NPSafEphU` shipped *before* those files were edited (see the correction in §22).
+
+**Post-deploy verification:**
+- `GET /` → 200 in 833ms
+- `GET /api/ai-status` → 200 in 302ms, `{"configured":true,"model":"z-ai/glm-5.3","provider":"nvidia","keyConfigured":true}`
+- `POST /api/copilot/chat` → 200 in 2.3s, body `pong`
+- ⚠️ **That smoke test does NOT prove the 300s ceiling works.** A 2.3s reply never approaches the limit. Verifying it needs a genuinely long reasoning call, or inspecting the function config — and note the §22 fluid-compute caveat: all routes bundle into ONE lambda, so per-route `maxDuration` is not readable from the deployments API.
+
+**Build noise (benign):** npm emits ~40 `ERESOLVE overriding peer dependency` warnings because `typescript@7.0.2` is outside the `>=4.8.4 <6.1.0` range that `typescript-eslint@8.70.1` expects. The build compiles and typechecks cleanly regardless.
+
+**Tooling note for whoever continues:** the PowerShell profile in this workspace intermittently breaks cmdlet resolution — `node`, `cmd`, `Remove-Item`, `Write-Output` and `Get-Content` have all thrown `CommandNotFoundException`, and long commands frequently return no output. Reliable patterns: write a `.mjs` script and run it with `node script.mjs 2>&1 | Out-File -FilePath X -Encoding utf8`, then read the file with the `read_file` tool; do git work with the GitKraken git MCP tools; delete files with `[IO.File]::Delete()`; verify pushes with `git ls-remote --heads origin`. PowerShell's `>` redirect writes UTF-16 and makes logs unsearchable.
 
 
