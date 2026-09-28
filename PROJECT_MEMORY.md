@@ -2,9 +2,9 @@
 
 > **Additional handoff (September 25):** Read [CODEX_HANDOFF_2026-09-25.md](CODEX_HANDOFF_2026-09-25.md) for the interrupted Codex reliability/backup/workflow batch, remaining issues and its limited verification. The historical test status below does not establish that this newer batch or concurrent edits are verified.
 
-**Last Updated:** September 26, 2026 (reliability pass)  
-**Status:** `npm test` green: 36 tests, 35 pass, 0 fail, 1 skipped (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`).  
-**Stack:** Next.js 15 (App Router, Turbopack), React 19, TypeScript, Vanilla CSS design system, Bitget Public Spot API.
+**Last Updated:** September 28, 2026 (Vercel production deploy + timeout ceiling raise)  
+**Status:** LIVE at https://goriee-ai-desk.vercel.app (public, AI verified end-to-end). `npm test` green: 36 tests, 35 pass, 0 fail, 1 skipped (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`, later `4fcb674`). Refinement backlog in [TODO.md](TODO.md).  
+**Stack:** Next.js 16.3.6 (App Router, Turbopack), React 19.3.0, TypeScript 7, Vanilla CSS design system, Bitget Public Spot API.
 
 ---
 
@@ -503,5 +503,94 @@ All 13 keys above are covered by the workspace backup allowlist in `src/lib/work
   2. SVG nodes' `.className` is an `SVGAnimatedString`, which serializes to `{}` across the CDP boundary — always read `getAttribute("class")`.
   3. Reward/risk corridors span entry → playhead, so they intentionally have zero width (and are not drawn) on the entry bar itself; they grow as the tape advances.
 - Dev server left running on `http://localhost:3000` (handover rule: do not terminate it).
+
+---
+
+## 🚀 22. Vercel Production Deploy & Public AI Access (September 28, 2026)
+
+- **Goal:** Get a publicly reachable demo site for the hackathon with server-side AI credentials so the LLM features work for anyone visiting the URL.
+- **Live site:** https://goriee-ai-desk.vercel.app (project `goriee-ai-desk`, team `goriees-projects`, projectId `prj_vVmYWayCKx9Vt6LD9GsbCD8IHaIK`, Vercel account `goriee`, Hobby plan).
+- **What was done:**
+  - Deployed via Vercel CLI (`& "C:\Users\Admin\AppData\Roaming\npm\vercel.cmd" deploy --prod --yes`) — CLI is NOT on PATH, must use full path. No git auto-deploy: the `goriee` Vercel account lacks access to GitHub `Mrcod3xx/Goriee-Desk`, so **every change must be redeployed manually**.
+  - Pushed `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` as Vercel Secrets on all environments. **Pitfall:** values in `.env.local` are double-quote-wrapped; piping them through stdin stored the quotes literally (ai-status showed `"model":"\"z-ai/glm-5.3\""`, null baseUrl). Fixed with `.Trim().Trim('"')` before `vercel env add`.
+  - Disabled Deployment Protection (SSO login wall) via `vercel api PATCH /v9/projects/<id> --input file.json` with `{"ssoProtection":null,"passwordProtection":null}`. **Pitfall:** PowerShell mangles inline JSON args (400 error) — always use `--input <file>`.
+  - Verified public access HTTP 200 and full AI round-trip: POST `/api/research` returned a complete GLM-generated report (summary / bullCase / bearCase / invalidation) in ~48s.
+- **Fixed 504 Gateway Timeout on AI routes:**
+  - Root cause: Vercel's default function duration is shorter than the `z-ai/glm-5.3` reasoning model's latency, so the platform killed the function mid-generation.
+  - First pass: added `export const maxDuration = 150;` to `src/app/api/research/route.ts`, `src/app/api/backtest/route.ts`, `src/app/api/copilot/chat/route.ts`.
+  - Second pass (user asked to let the AI finish): raised to **`maxDuration = 300`** on all three routes — 300s is the *hard ceiling* on the Hobby plan (verified in Vercel docs; Pro allows 800s, Enterprise 1800s beta). Also raised the LLM fetch timeout in `src/lib/llm.ts` from `120000` → **`280000`** ms for the nvidia/glm branch (non-nvidia branch stays at 35000).
+  - **Design note:** the client timeout is deliberately 280s, not 300s, so our own `AbortSignal` fires first and the UI shows a readable error rather than a raw platform 504.
+  - **Clarification for future agents:** reasoning is NOT forced by Vercel and cannot be "removed" via config — the slowness is inherent to the GLM reasoning model on NVIDIA's free tier. Most calls still finish in 20–60s; the raised ceiling only prevents premature cutoffs.
+- **Verification:** `node node_modules\next\dist\bin\next build` clean (11 routes); deploy Ready in 28s and aliased; post-deploy smoke test POST `/api/research` → **HTTP 200 in 22s** with a real report.
+- **Uncommitted at end of session:** the 3 API route files, `src/lib/llm.ts`, `.gitignore` (duplicate `.env*` line removed, `.vercel/` normalized), plus new `TODO.md`. The live site is unaffected (CLI deploys, not git), but the repo no longer matches production.
+- **PowerShell gotchas hit repeatedly:** `vercel` writes its version banner to stderr → benign `NativeCommandError` noise; long commands often swallow inline output → redirect to `$env:TEMP\*.txt` and read after; a stuck continuation prompt recovers with a plain `probe` command. Execution policy blocks npm/npx shims → invoke `node node_modules\next\dist\bin\next build` directly.
+- **Fluid compute note:** deployments bundle ALL functions into one lambda (`lambdas.Count == 1`, entrypoint `.`), so per-route `maxDuration` is not inspectable via `/v13/deployments/<dpl_id>`. Also, `vercel api` requires the `dpl_`-prefixed ID — the short ID from the deploy URL returns 404.
+
+## 📝 23. Refinement Backlog Established (September 28, 2026)
+
+- Audited the codebase for what to improve next (explicitly **no new features**) and recorded the prioritized plan in [TODO.md](TODO.md).
+- Measured state: `src/components/trading-desk.tsx` = **8,855 lines / 481 KB**, `src/app/globals.css` = **12,566 lines / 325 KB**; `npm run typecheck` 0 errors; working tree committed at `4fcb674`.
+  - ⚠️ **Superseded the same day — these figures were stale.** See §24: `trading-desk.tsx` is actually **6,649 lines / 373 KB** and `globals.css` is **13,524 lines** (still 325 KB). The monolith split had already been started, and six extracted files were sitting untracked in git.
+- Confirmed the research-provenance race (Codex handoff item 2) is already fixed — `researchRef` is now passed explicitly. Confirmed `compileDeterministicFallback` still races the LLM with a 15s timeout in `src/app/api/backtest/route.ts` with no UI disclosure when the fallback wins.
+- Agreed execution order: **verification baseline → split the trading-desk monolith → reliability leftovers → CSS partials → test folder hygiene**.
+
+## 📝 24. Full Code Review → TODO.md Expanded to Items 6–13 (September 28, 2026)
+
+Ran a read-only review of the app's *current* state (no edits) to find what else needs fixing/refining in existing functionality. Appended the results to [TODO.md](TODO.md) as items 6–13; original items 1–5 and their order are unchanged. Every finding below is code-grounded with file/line refs so it can be acted on without re-investigating.
+
+**⚠️ Discovery that changes the plan — the monolith split is already underway and uncommitted.**
+`git status --short` revealed far more pending work than §23 recorded. Actual measured sizes (via `[IO.File]::ReadAllText` — note PowerShell's `Measure-Object -Line` *undercounts* these files, reporting 6,388 for a 6,649-line file):
+
+| File | Lines | KB | Git state |
+|---|---|---|---|
+| `trading-desk.tsx` | **6,649** (was 8,855) | 373 (was 481) | ✅ committed `ef9e6da` |
+| `globals.css` | **13,524** (was 12,566) | 325 | committed |
+| `price-chart.tsx` | 1,714 | 72 | ✅ committed `ef9e6da` |
+| `research-panels.tsx` | 401 | 18 | ✅ committed `ef9e6da` |
+| `desk-types.ts` | 214 | 6 | ✅ committed `ef9e6da` |
+| `desk-charts.tsx` | 141 | 6 | ✅ committed `ef9e6da` |
+| `desk-shared.ts` | 132 | 4 | ✅ committed `ef9e6da` |
+| `desk-icon.tsx` | 50 | 5 | ✅ committed `ef9e6da` |
+
+So ~2,650 lines had been extracted out of the monolith into six new files. **At review time those six files were untracked in git while the live Vercel deployment had been built from this exact tree** — the repo did not match production and a careless `git checkout .` would have destroyed the extraction. **RESOLVED 2026-09-28: all committed and pushed.** Three logical commits:
+- **`a4d87fd`** `perf(api): raise LLM route timeouts to the Vercel Hobby ceiling` — `.gitignore`, `src/lib/llm.ts`, and the 3 API routes
+- **`ef9e6da`** `refactor(desk): extract ~2,650 lines out of the trading-desk monolith` — the 6 new components + `trading-desk.tsx`
+- docs commit — `TODO.md` + `PROJECT_MEMORY.md`
+
+Safety gate run before committing the split: `tsc --noEmit` clean, and `node --test` on the 6 suite files → **54 tests / 53 pass / 0 fail / 1 skipped** (the skip is the opt-in live-AI test gated on `GORIEE_RUN_LIVE_AI_TESTS=1`).
+
+⚠️ Note: git now matches prod for *source*, but there is still **no CI/auto-deploy** — the GitHub repo `Mrcod3xx/Goriee-Desk` isn't reachable from the `goriee` Vercel account, so deploys remain manual (`vercel deploy --prod --yes`).
+
+**🔴 Critical (blank-screen risk on the live public site):**
+- **No error boundary anywhere.** Zero `ErrorBoundary` / `componentDidCatch` / `getDerivedStateFromError`; no `src/app/error.tsx`, `global-error.tsx`, `loading.tsx` or `not-found.tsx`. `src/app/` holds only `globals.css`, `layout.tsx`, `page.tsx`, `api/`. Any render-time throw unmounts the whole React tree → blank white page, no recovery UI.
+- **~30 unguarded `localStorage.setItem` calls** in `trading-desk.tsx` (`:721`, `:756`, `:881`, `:896`, `:918`, `:927`, `:949`, `:958`, `:980`, `:1062`, `:1174`, `:1177`, `:1211`, `:1259`, `:1267`, `:1274`, `:1346`, `:1353`, `:1373`, `:1458`, `:1463`, `:1494`, `:2303`, `:2338`, `:5075`, `:5114`, `:5315`, `:5457`, `:6319`, `:6352`). Only `:144`, `:322` and `workspace-backup.tsx:32` are in try/catch. `QuotaExceededError` (journal/paper/replay logs grow unbounded) or Safari private mode throws inside effects/handlers — combined with the missing boundary this white-screens the app.
+- **`setInterval` shadowed by React state** at `trading-desk.tsx:44`: `const [interval, setInterval] = useState("1H")`. Of 27 `setInterval(` call sites, 8 correctly use `window.setInterval(...)` for real timers (`:152`, `:263`, `:275`, `:404`, `:674`, `:705`, `:1514`, `:2052`) and **19 use the bare name as a state setter** (`:967`, `:978`, `:1145`, `:1826`, `:2273`, `:2463`, `:2765`, `:3208`, `:3820`, `:3841`, `:3862`, `:3883`, `:3968`, `:5268`, `:5655`, `:5668`, `:5681`, `:5997`, `:6453`). Works only by discipline — a future `setInterval(fn, ms)` in this component would call React's updater with `fn`. Fix: rename to `chartInterval` / `setChartInterval`.
+
+**🔴 New exposure since going public:**
+- **No server-side rate limiting** on `/api/research`, `/api/backtest`, `/api/copilot/chat`. Grep for `rate.?limit|rateLimit|Upstash` → only *handling* of upstream 429s (`ai-errors.ts:9,15`, `desk-shared.ts:118`, `bitget.ts:61,76`, `llm.ts:216-224`). The sole cooldown is client-side `goriee.ai-cooldown.v1` in localStorage (`trading-desk.tsx:132-149`), trivially bypassed. With `maxDuration = 300` each request can burn 5 min of function duration against Hobby concurrency. Input validation is already solid (symbol regex `/^[A-Z0-9]{5,20}$/`, interval whitelist, 600-char question slice, `/api/settings` local-dev-only + HTTPS/CRLF checks) — the gap is *volume*, not *shape*.
+- **No server-side caching.** `next.config.ts` is literally `{}`; all routes `force-dynamic`; `bitgetGet` uses `cache: "no-store"` (`bitget.ts:56`, `:143`). Every visitor independently re-fetches the same slowly-changing scanner/tickers/tokens data.
+
+**🟠 Live-data behavior:**
+- **No `visibilitychange` / `online` / `offline` / `document.hidden` / `navigator.onLine` handling** anywhere in `src/**` (grep: 0 matches). Three 60s polling loops (`trading-desk.tsx:404`, `:674`, `:705`), a 3s orderbook recursion (`orderbook-panel.tsx:40`) and 1s clocks keep firing in hidden tabs.
+  - **Correction:** there are NO `connection-status-offline/fallback/connected` CSS classes in `globals.css` — an earlier note claimed they existed. The only connection UI is the WS badge at `trading-desk.tsx:2497-2501`, which is **binary** (`ws-connected` vs `ws-fallback`, rendering "WS Live" or "REST Polling"). It cannot distinguish "Bitget WS down" from "you have no internet".
+- **Quote staleness computed but never enforced.** Quotes carry `asOf` (`trading-desk.tsx:663-667`) yet paper fills (`:721`), bracket triggers (`:730+`) and alert hits (`:712`) consume them with no max-age gate. Same root as handoff item 5 (bracket stale-quote timestamping) in TODO item 3.
+- **WS reconnect: fixed 3000ms forever**, no exponential backoff/jitter/max-attempts (`bitget-ws.ts:147-149`). Also `onerror` sets `"fallback"` (`:140`, `:153`) while `onclose` sets `"offline"` (`:145`) then reconnects → status flickers. The 4-state `WsConnectionStatus` union (`:15`) is wider than what the UI renders — `"connecting"` and `"offline"` look identical. Otherwise the module is well-built (`isDisposed` guard, full listener cleanup, `onTickRef` to dodge stale closures, 25s ping at `:92`).
+- **Bitget 429 retry too naive**: fixed 300ms × 2 (`bitget.ts:61-63`), ignores `Retry-After`, and the catch branch string-matches `String(error).includes("429")` (`:76`).
+
+**🟡 Correctness / data integrity:**
+- **Unguarded float money math** (no epsilon/cent rounding) in `replay-engine.ts` (`avgPrice`, `grossPnl`, `netPnl = grossPnl - fee`, `costBasis`, `cash`, `realizedPnl`), `portfolio-analytics.ts` (`equity += trade.netPnl`), `backtest.ts` (`returnPct`), `parameter-matrix.ts`. Drift accumulates over long paper/replay sessions → possible `-$0.00` and penny mismatches.
+
+**🟢 A11y / polish:**
+- **No modal traps Tab focus.** All five declare `aria-modal="true"` yet none constrain focus, so keyboard users can Tab into the page *behind* the backdrop. There IS one good shared effect at `trading-desk.tsx:851-871` doing Escape-close + body scroll-lock + focus restore (`previouslyFocused?.focus()`), but it only covers `selectedJournalItem`, `orderOpen` and `pickerOpen` — **bracket-edit (`:6246`) and the mobile more-sheet (`:6504`) are outside it**. Extract into a reusable `<Modal>` (also de-duplicates the `onMouseDown` backdrop-dismiss repeated at `:6025`, `:6246`, `:6365`, `:6383`).
+- **`research-panels.tsx:67`** swallows clipboard failure with `.catch(() => {})` and uses a native blocking `alert()` for success instead of the app's toast (`trading-desk.tsx:6384-6385`). Silent catches also at `price-chart.tsx:659`, `:700`, `trading-desk.tsx:148`, `workspace-backup.tsx:32`.
+- **`price-chart.tsx:688`** `handleMouseMove(e as any)` is the only `as any` / `@ts-ignore` in `src/**`.
+- **Duplicated UI blocks:** bracket TP/SL/trail fields appear twice with different state vars — inline (`:6168-6197`, `takeProfitPct`) and the edit modal (`:6264-6293`, `bracketModalTp`) — plus duplicate storage writes (`:6319`/`:6352`). The `15m/1H/4H/1D` picker is hand-rolled in 6 distinct places: 3 `<select>`s (`:2463`, `:2765`, `:3208`) and 3 button groups (`:3820`/`:3841`/`:3862`/`:3883`, `:3968`, `:5655`/`:5668`/`:5681`). Extracting `<BracketFields>` + `<IntervalPicker>` directly advances TODO item 2.
+- **Toast system already exists and is well-used** (`toastMessage` / `setToastMessage`, 36 call sites, rendered at `:6384-6385`, auto-dismisses after 3.5s at `:1572-1575`) — which makes the native `alert()` in `research-panels.tsx:67` a clear inconsistency rather than a missing feature.
+- **No share metadata.** `layout.tsx` (24 lines) has only `title` + `description` — no `openGraph`, `twitter:card`, OG image, `metadataBase` or `themeColor`. The live link renders as a bare URL when posted. Cheapest high-visibility win for judging.
+- **Doc drift:** ✅ FIXED — the Stack line at the top of this file said "Next.js 15" while the project actually runs **Next.js 16.3.6** (per `package.json`). Corrected to Next.js 16.3.6 / React 19.3.0 / TypeScript 7 on 2026-09-28.
+
+**Good news confirmed during the review (don't "fix" these):** accessibility baseline is solid — 26 `role="alert"` / `role="status"` / `aria-live` usages across 8 files, `.visually-hidden` defined (`globals.css:3458`) and used, error banners have "Try again" buttons (`:2482`, `:2720`). Zero real `TODO`/`FIXME`/`HACK` markers in the codebase (the 38 grep hits were all `placeholder=` attributes and `::placeholder` CSS).
+
+**Recommended sequencing:** items **6, 7, 8, 11** are small and independent — land them before the big monolith split. Items **9, 10, 12** interact with the refactor, so sequence them *with* TODO item 2 rather than before it.
 
 
