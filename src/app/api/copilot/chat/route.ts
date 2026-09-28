@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getLLMConfiguration, getLLMProvider } from "@/lib/llm";
 import { buildCopilotSystemPrompt } from "@/lib/copilot-prompt";
+import { guardAiRequest } from "@/lib/ai-limit-response";
 import { CopilotContextPayload } from "@/types/copilot";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,14 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   }
+
+  // Reserved after validation so bad input never spends budget or a slot. This
+  // route streams, so the slot is held for the whole upstream response: release
+  // runs in each stream's finally/cancel and before every early error return.
+  // `guard.release` is idempotent, so overlapping those paths is safe.
+  const guard = guardAiRequest(request.headers);
+  if (!guard.allowed) return guard.response;
+  const release = guard.release;
 
   const context: CopilotContextPayload = body.context ?? {
     symbol: "BTCUSDT",
@@ -83,6 +92,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (!response.ok) {
+        release();
         const errorText = await response.text().catch(() => "");
         return new Response(
           JSON.stringify({ error: `Anthropic API error (${response.status}): ${errorText.slice(0, 200)}` }),
@@ -95,6 +105,7 @@ export async function POST(request: NextRequest) {
           const reader = response.body?.getReader();
           if (!reader) {
             controller.close();
+            release();
             return;
           }
           const decoder = new TextDecoder();
@@ -127,7 +138,12 @@ export async function POST(request: NextRequest) {
             controller.error(err);
           } finally {
             controller.close();
+            release();
           }
+        },
+        cancel() {
+          // Client hung up mid-stream; the slot must not be stranded.
+          release();
         },
       });
 
@@ -139,6 +155,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (err: unknown) {
+      release();
       const message = err instanceof Error ? err.message : "Connection failed";
       return new Response(JSON.stringify({ error: message }), {
         status: 500,
@@ -178,6 +195,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
+      release();
       const errorText = await response.text().catch(() => "");
       return new Response(
         JSON.stringify({ error: `AI provider error (${response.status}): ${errorText.slice(0, 200)}` }),
@@ -190,6 +208,7 @@ export async function POST(request: NextRequest) {
         const reader = response.body?.getReader();
         if (!reader) {
           controller.close();
+          release();
           return;
         }
         const decoder = new TextDecoder();
@@ -224,7 +243,12 @@ export async function POST(request: NextRequest) {
           controller.error(err);
         } finally {
           controller.close();
+          release();
         }
+      },
+      cancel() {
+        // Client hung up mid-stream; the slot must not be stranded.
+        release();
       },
     });
 
@@ -236,6 +260,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err: unknown) {
+    release();
     const message = err instanceof Error ? err.message : "Failed to connect to AI router";
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

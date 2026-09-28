@@ -120,6 +120,12 @@ export function formatDate(value: number, includeTime = true) {
 }
 
 export function researchErrorMessage(message: string) {
+  // The desk's own pacing messages (src/lib/ai-rate-limit.ts) start with "The
+  // desk is" and must survive verbatim: the 429 branch below would otherwise
+  // rewrite them into "The AI provider is temporarily limiting requests",
+  // sending the user to check a provider quota that has nothing to do with our
+  // server-side throttle.
+  if (/^The desk is /i.test(message)) return message;
   if (/no endpoints found that can handle the requested parameters/i.test(message)) {
     return "OpenRouter could not find an available route for this request. Review the selected model in AI settings, then try again.";
   }

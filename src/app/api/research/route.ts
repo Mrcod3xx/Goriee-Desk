@@ -3,6 +3,8 @@ import { getLLMConfiguration, requestJsonCompletion } from "@/lib/llm";
 import { fetchLiveMarketNews } from "@/lib/news";
 import { NextRequest, NextResponse } from "next/server";
 import { aiErrorResponse } from "@/lib/ai-errors";
+import { guardAiRequest } from "@/lib/ai-limit-response";
+import { WEB_RESEARCH_COST } from "@/lib/ai-rate-limit";
 
 const allowedIntervals = new Set(["15m", "1H", "4H", "1D"]);
 const intervalMs: Record<string, number> = {
@@ -60,6 +62,12 @@ export async function POST(request: NextRequest) {
       error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL to the server's .env.local file, then restart the app.",
     }, { status: 503 });
   }
+
+  // Applied after validation so malformed input never consumes budget or a
+  // concurrency slot. Live web research fans out to several upstream news
+  // fetches, so it is charged at WEB_RESEARCH_COST instead of 1.
+  const guard = guardAiRequest(request.headers, includeWebResearch ? WEB_RESEARCH_COST : 1);
+  if (!guard.allowed) return guard.response;
 
   try {
     const market = await getSpotMarket(symbol, interval, 180);
@@ -171,5 +179,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const failure = aiErrorResponse(error);
     return NextResponse.json(failure, { status: failure.status });
+  } finally {
+    guard.release();
   }
 }

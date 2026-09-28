@@ -3,6 +3,7 @@ import { runBacktestSimulation, validateStrategyDraft, type StrategyDraft } from
 import { getLLMConfiguration, requestJsonCompletion } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { aiErrorResponse } from "@/lib/ai-errors";
+import { guardAiRequest } from "@/lib/ai-limit-response";
 
 const allowedIntervals = new Set(["15m", "1H", "4H", "1D"]);
 const intervalMs: Record<string, number> = {
@@ -50,6 +51,12 @@ export async function POST(request: NextRequest) {
       error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL to the server's .env.local file, then restart the app.",
     }, { status: 503 });
   }
+
+  // Applied after validation so malformed input never consumes budget or a
+  // concurrency slot. The early 400 returns inside the try block still release
+  // the slot through the finally clause below.
+  const guard = guardAiRequest(request.headers);
+  if (!guard.allowed) return guard.response;
 
   try {
     const startAt = Date.now() - lookbackDays * 24 * 60 * 60_000;
@@ -205,5 +212,7 @@ function compileDeterministicFallback(prompt: string): { model: string; result: 
   } catch (error) {
     const failure = aiErrorResponse(error);
     return NextResponse.json(failure, { status: failure.status });
+  } finally {
+    guard.release();
   }
 }
