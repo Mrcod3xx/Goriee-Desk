@@ -5,6 +5,11 @@ import { CopilotContextPayload } from "@/types/copilot";
 
 export const dynamic = "force-dynamic";
 
+// Let slow reasoning models (GLM via NVIDIA NIM) run to completion. 300s is the
+// hard maximum on the Vercel Hobby plan; the LLM fetch itself gives up at 280s
+// (src/lib/llm.ts) so a hung model still returns a readable error, not a 504.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const configuration = getLLMConfiguration();
   if (!configuration) {

@@ -193,7 +193,10 @@ export async function requestJsonCompletion<T>(
       "content-type": "application/json",
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(provider === "nvidia" || configuration.model.includes("glm") ? 120000 : 35000),
+    // 280s for slow reasoning models so they can finish inside the 300s Vercel
+    // function budget (route maxDuration); aborting first lets us return a
+    // readable error instead of a platform 504.
+    signal: AbortSignal.timeout(provider === "nvidia" || configuration.model.includes("glm") ? 280000 : 35000),
   });
 
   // Failed requests also count toward free-model quotas, so return the first failure to the user.
