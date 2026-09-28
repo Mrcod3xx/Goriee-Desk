@@ -3,6 +3,8 @@
 > Created September 28, 2026. Execution order: **1 → 2 → 3 → 4 → 5** (verification baseline first so refactors can be proven safe).
 >
 > **Items 6–13 added September 28, 2026** from a full read-only code review. They are refinements to *existing* functionality only — no new features. Quick wins that are small and independent of the monolith split: **6, 7, 8, 11**. Items **9, 10, 12** interact with the split and are best sequenced *with* item 2 rather than before it.
+>
+> **Update (later Sept 28): item 6 is DONE** — crash-safety shipped first because it was the only gap that could blank the entire app mid-demo (see item 6 for what shipped and for corrections to the original findings). Remaining 🔴 quick wins: **7, 8**.
 
 ## 1. Run verification baseline suite ⬜
 Establish a true green baseline BEFORE any refactoring (the Codex handoff batch was never fully validated after concurrent edits).
@@ -36,14 +38,25 @@ It still holds nearly all app state (live prices, WS ticks, backtests, paper acc
 - [ ] Consolidate the durable ones into npm scripts
 - [ ] Archive the throwaways
 
-## 6. Crash-safety: error boundaries + guarded storage 🔴 (do first) ⬜
-Highest-consequence gap for a public demo — any throw currently unmounts the whole React tree into a blank white page with no recovery UI.
-- [ ] Add `src/app/error.tsx` (route-level error UI with a working reset) and `src/app/global-error.tsx` (root fallback)
-- [ ] Add `src/app/not-found.tsx` and `src/app/loading.tsx` so cold visits never hit a bare Next.js default
-- [ ] Add a reusable React `ErrorBoundary` around the desk shell so one broken panel doesn't kill the app
-- [ ] Wrap the ~30 unguarded `localStorage.setItem` calls in `trading-desk.tsx` (`:721`, `:756`, `:881`, `:896`, `:918`, `:927`, `:949`, `:958`, `:980`, `:1062`, `:1174`, `:1177`, `:1211`, `:1259`, `:1267`, `:1274`, `:1346`, `:1353`, `:1373`, `:1458`, `:1463`, `:1494`, `:2303`, `:2338`, `:5075`, `:5114`, `:5315`, `:5457`, `:6319`, `:6352`) in a single safe-write helper — only `:144`, `:322` and `workspace-backup.tsx:32` are protected today
-- [ ] Handle `QuotaExceededError` explicitly: surface a toast telling the user local journal/paper/replay storage is full, instead of throwing inside an event handler
-- [ ] Add a quota pressure valve — journal/paper/replay logs grow unbounded in localStorage with no pruning or cap
+## 6. Crash-safety: error boundaries + guarded storage 🔴 ✅ DONE — committed 2026-09-28
+Was the highest-consequence gap for a public demo: any throw unmounted the whole React tree into a blank white page with no recovery UI, and ~30 `localStorage` writes could throw `QuotaExceededError` straight out of an event handler. All shipped, typecheck-clean, `next build` green, and browser-verified (route error → retry recovery; descendant crash → contained panel fallback with nav/watchlist/footer alive; tab switch clears a caught error via `resetKey`).
+- [x] Add `src/app/error.tsx` (route-level error UI with a working reset) and `src/app/global-error.tsx` (root fallback)
+- [x] Add `src/app/not-found.tsx` and `src/app/loading.tsx` so cold visits never hit a bare Next.js default
+- [x] Add a reusable React `ErrorBoundary` around the desk shell so one broken panel doesn't kill the app
+- [x] Wrap the unguarded `localStorage.setItem` calls in a single safe-write helper
+- [x] Handle `QuotaExceededError` explicitly: surface a toast instead of throwing inside an event handler
+- [x] Add a quota pressure valve with a never-prune guarantee for user-critical data
+
+**What actually shipped (differs from the original notes — corrections recorded here so nobody "rediscovers" them):**
+- `src/lib/safe-storage.ts` — `safeWrite` / `safeWriteJson` / `safeRemove` never throw; `isQuotaError` matches all four browser spellings; per-reason throttled failure notifications (4s) via `subscribeToStorageFailures`; optional synchronous `registerQuotaRelief` handler with one automatic retry. 24 tests in `test/safe-storage.test.mjs` (registered in `test`, `test:unit`, `test:all`).
+- `src/lib/storage-relief.ts` — quota valve drops only disposable tiers in order: drafts → rule-runner audit log → copilot history → saved research reports. **The paper ledger, brackets, alerts, playbooks, watchlist and scalar settings are never pruned:** `paperCash()` folds over *every* fill, so truncating the ledger would silently change the balance, and dropping brackets would remove a stop the user believes is protecting them. Test #19 locks this guarantee in.
+- **Count correction:** it was **30 unguarded write sites + 4 remove sites, all in `trading-desk.tsx`** (not "~30 incl. `strategy-copilot.tsx:194`" — that one was already wrapped in try/catch; it still uses raw `localStorage` and could optionally migrate for consistency). Zero raw `localStorage.setItem`/`removeItem` calls remain in `trading-desk.tsx`.
+- **Growth correction:** journal (30), playbooks (30), rule-runner logs (15) and watchlist (50) were *already* capped. The genuinely uncapped stores are `paperTrades` (must NOT be capped — see ledger note above), `paperAlerts`, and copilot session message arrays.
+- `ErrorBoundary` wraps the whole view-switch region once (`resetKey={view}`), not per-tab: views are mutually exclusive so one boundary isolates a crash exactly as well as nine, with a far smaller diff.
+- Toast messages from storage failures are deferred with `setTimeout(…, 0)` because two `safeWriteJson` calls live inside `setState` updaters (trailing-stop peak ~`:761`, bracket delete ~`:1216`) — a synchronous `setToastMessage` there would be an illegal render-phase update. The in-updater writes were deliberately *not* moved: `safeWriteJson` never throws, so the crash hazard is gone, and the residual impurity is self-healing.
+- `error.tsx` uses Next 16's `retry` prop (not the deprecated-in-docs `reset`); `global-error.tsx` hard-codes its palette because global styles don't reach it.
+- New CSS lives at the end of `globals.css` under the `.desk-fatal-*` / `.desk-panel-error` / `.desk-boot-*` banners (reuses existing `fadeIn` / `skeleton-wave` / `spin` keyframes; the global `prefers-reduced-motion` rule at `:3689` covers them).
+
 
 ## 7. Rename the shadowed `setInterval` state setter 🔴 (latent bug) ⬜
 `trading-desk.tsx:44` declares `const [interval, setInterval] = useState("1H")`, so the component-local `setInterval` is *not* `window.setInterval`. Of the 27 `setInterval(` call sites, 8 correctly write `window.setInterval(...)` for real timers (`:152`, `:263`, `:275`, `:404`, `:674`, `:705`, `:1514`, `:2052`) and the other **19 use the bare name as a state setter** (`:967`, `:978`, `:1145`, `:1826`, `:2273`, `:2463`, `:2765`, `:3208`, `:3820`, `:3841`, `:3862`, `:3883`, `:3968`, `:5268`, `:5655`, `:5668`, `:5681`, `:5997`, `:6453`). Any future `setInterval(fn, ms)` inside this component would silently call React's updater with `fn`.
@@ -61,8 +74,8 @@ The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backte
 Zero `navigator.onLine` / `visibilitychange` / `document.hidden` usage anywhere in `src/**`. Three independent 60s loops (`trading-desk.tsx:404`, `:674`, `:705`) plus the 3s orderbook recursion (`orderbook-panel.tsx:40`) keep firing in background tabs.
 - [ ] Gate polling on `document.hidden` and resume/refresh on `visibilitychange`
 - [ ] Listen for `online` / `offline` and surface a connection banner. Today the only status UI is the WS badge at `trading-desk.tsx:2497-2501`, which is **binary** — it renders only `ws-connected` vs `ws-fallback` and cannot distinguish "Bitget WS is down" from "you have no internet".
-- [ ] Quotes already carry `asOf` timestamps (`:663-667`) but nothing consumes them for freshness — gate paper fills (`:721`), bracket triggers (`:730+`) and alert hits (`:712`) on a max-age check
-- [ ] Surface a visible "quote stale" indicator; same root as handoff item 5 (bracket stale-quote timestamping) in item 3 above
+- [ ] **Scope correction (verified Sept 28):** quote-staleness gating is *mostly already done*. Bracket triggers ARE gated (`trading-desk.tsx:734-735`: skips fills when `quoteAge > 120_000`, covered by three passing tests in `test/bracket-lifecycle.test.mjs`), market-data consumers are gated (`:1186`), and a visible staleness indicator exists (`:5410`). The **only genuinely ungated path is the alert-hit effect at `:712-716`** — gate that one on the same max-age check.
+- [ ] Same root as handoff item 5 (bracket stale-quote timestamping) in item 3 above — re-verify, don't reimplement
 
 ## 10. Harden live-data resilience 🟠 ⬜
 - [ ] `bitget-ws.ts:147-149` reconnects on a flat 3000ms forever — add exponential backoff, jitter, and a max-attempts cap so a prolonged Bitget outage doesn't turn into an infinite reconnect hammer

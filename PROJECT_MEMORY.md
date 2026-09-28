@@ -624,6 +624,44 @@ Safety gate run before committing the split: `tsc --noEmit` clean, and `node --t
 
 **Build noise (benign):** npm emits ~40 `ERESOLVE overriding peer dependency` warnings because `typescript@7.0.2` is outside the `>=4.8.4 <6.1.0` range that `typescript-eslint@8.70.1` expects. The build compiles and typechecks cleanly regardless.
 
-**Tooling note for whoever continues:** the PowerShell profile in this workspace intermittently breaks cmdlet resolution — `node`, `cmd`, `Remove-Item`, `Write-Output` and `Get-Content` have all thrown `CommandNotFoundException`, and long commands frequently return no output. Reliable patterns: write a `.mjs` script and run it with `node script.mjs 2>&1 | Out-File -FilePath X -Encoding utf8`, then read the file with the `read_file` tool; do git work with the GitKraken git MCP tools; delete files with `[IO.File]::Delete()`; verify pushes with `git ls-remote --heads origin`. PowerShell's `>` redirect writes UTF-16 and makes logs unsearchable.
+## 🛡️ 26. Crash-Safety Release — Error Boundaries + Guarded Storage (September 28, 2026)
+
+TODO item 6, chosen first of the 13 backlog items because it was the only gap that could **blank the entire app mid-demo**: any throw unmounted the whole React tree into a white page with no recovery UI, and ~30 `localStorage` writes could throw `QuotaExceededError` straight out of an event handler. Every other 🔴 item degrades a *feature*; this one destroyed the *app*. Also the most mechanical, lowest-regression-risk 🔴 fix.
+
+### New files
+| File | Purpose |
+|---|---|
+| `src/lib/safe-storage.ts` | `safeWrite` / `safeWriteJson` / `safeRemove` — **never throw**. `isQuotaError` matches all four browser spellings (`QuotaExceededError`, `NS_ERROR_DOM_QUOTA_REACHED`, `code 22`, `code 1014`). Per-reason throttled (4s) failure notifications via `subscribeToStorageFailures`; synchronous `registerQuotaRelief` hook with one automatic retry inside the same call. |
+| `src/lib/storage-relief.ts` | Quota pressure valve. Drops only disposable tiers, cheapest first: drafts → rule-runner audit log → copilot history → saved research reports. `describeDroppedStores` renders the English list for the toast. |
+| `src/components/error-boundary.tsx` | Reusable class boundary (`getDerivedStateFromError`/`componentDidCatch` — no hook equivalent exists). Props: `label`, `fallback`, `onError`, `resetKey` (clears a caught error when the key changes). Default fallback = `.desk-panel-error` card. |
+| `src/app/error.tsx` | Route-level UI, uses Next 16's **`retry`** prop (not `reset` — docs say "in most cases you should use retry()"). Branded `.desk-fatal-*` card, Retry + Reload. |
+| `src/app/global-error.tsx` | Root fallback. **Zero imports and hard-codes the palette** — global styles don't reach it, it must render its own `<html>`/`<body>`, and it cannot export `metadata` (uses React `<title>`). |
+| `src/app/not-found.tsx` | Plain server component; "This page isn't part of the desk" + link home. (`global-not-found.js` skipped — still experimental, needs `experimental.globalNotFound`.) |
+| `src/app/loading.tsx` | Boot skeleton (`.desk-boot-*`), server component, no params. |
+| `test/safe-storage.test.mjs` | 24 tests. Full suite now **78 / 77 pass / 0 fail / 1 skipped** (skip = opt-in live-AI test). |
+
+### Key architectural findings (do not "fix" these)
+1. **The paper ledger must NEVER be pruned.** `paperCash()` (`src/lib/paper-accounting.ts:7-8`) reduces over *every* fill — truncating the ledger silently changes the account balance. Same for `paperBrackets` (dropping removes a stop the user believes is protecting them) and `paperAlerts`/`playbooks`/`watchlist` (user-created config). Test #19 locks the never-prune guarantee in with a 9-key sentinel map.
+2. **Two `safeWriteJson` calls live inside `setState` updaters** (trailing-stop peak ~`:761`, full-close bracket delete ~`:1216`). Deliberately not moved: `safeWriteJson` never throws, so the crash hazard is gone, and the residual impurity is self-healing. **Consequence:** storage-failure toasts must be deferred with `setTimeout(…, 0)` — a synchronous `setToastMessage` from within an updater is an illegal render-phase update.
+3. **Relief-success must toast too.** When the relief handler frees space, `safeWrite` returns `{ok:true, relieved:true}` and the failure listener never fires — so the "we cleared your copilot history" toast lives *inside the relief handler itself*, not in the listener. Otherwise user data vanishes silently.
+4. **Node cannot resolve the `@/` alias.** `storage-relief.ts` imports `../components/desk-shared.ts` relatively with the explicit extension, matching repo convention (`lib/backtest.ts` etc.) — that's what makes it testable under `node --test`.
+
+### trading-desk.tsx changes
+- Imports: `ErrorBoundary`, `safeWrite`/`safeWriteJson`/`safeRemove`/`subscribeToStorageFailures`/`registerQuotaRelief`, `relieveStorageQuota`/`describeDroppedStores`.
+- New mount effect (right after the hydration effect): registers the relief handler (toasts what it dropped), subscribes to failures (three toasts: quota / unavailable / error), cleanup unsubscribes + `registerQuotaRelief(null)`.
+- **Codemod: 34 sites converted** (30 writes → `safeWriteJson`, 4 removes → `safeRemove`) + 3 hand-fixes (`aiCooldown` bare-string write, `activePlaybook`, drafts effect). **Zero raw `localStorage.setItem`/`removeItem` remain.**
+- `ErrorBoundary` wraps the whole view-switch region once with `resetKey={view}` — views are mutually exclusive, so one boundary isolates a crash exactly as well as nine, with a far smaller diff in a 6,649-line file. Header/nav/footer stay mounted either way.
+- `desk-shared.ts` gained `storageKeys`: `drafts` (`goriee.drafts.v1`), `copilotSessions` (`goriee_copilot_sessions_v1` — underscore spelling predates the dotted convention; renaming would orphan saved history), `ruleRunnerLogs`, `aiCooldown`.
+
+### Verification (all green before commit)
+- `tsc --noEmit` exit 0; `next build` exit 0 (`/_not-found` registered, 11 static pages).
+- Browser: all 9 views render, **0 console errors**; `/this-route-does-not-exist` → branded 404; injected throw in `TradingDesk`'s own render → caught by route-level `error.tsx` (a descendant boundary can't catch its own component's render — correct React semantics), **Retry recovered fully**; injected throw in a *descendant* (`ProviderSettings`) → inner `.desk-panel-error` card, nav (9 buttons)/watchlist (3 tokens)/footer alive, tab switch cleared it via `resetKey`.
+- Temporary test throws were removed and verified gone (`grep` clean).
+
+### Corrections to earlier notes (recorded so nobody rediscovers them)
+- `strategy-copilot.tsx:194` **was already guarded** (try/catch); the real unguarded count was 30, all in `trading-desk.tsx`. It still uses raw `localStorage` — optional consistency migration, not a bug.
+- TODO item 9 overstated staleness: bracket triggers ARE gated (`:734-735`, 3 passing tests in `test/bracket-lifecycle.test.mjs`), `:1186` gates market data, `:5410` renders the indicator. **Only the alert-hit effect at `:712-716` is genuinely ungated.**
+- TODO item 6 overstated growth: journal (30) / playbooks (30) / rule-runner logs (15) / watchlist (50) were already capped. Genuinely uncapped: `paperTrades` (must stay — see finding 1), `paperAlerts`, copilot session arrays.
+- CSS: appended `.desk-fatal-*`, `.desk-panel-error*`, `.desk-boot-*` banners at the end of `globals.css` (13,524 → 13,744 lines), reusing existing `fadeIn`/`skeleton-wave`/`spin` keyframes; the global `prefers-reduced-motion` rule at `:3689` covers them, so no new one was added.
 
 
