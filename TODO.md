@@ -8,7 +8,7 @@
 
 ## 1. Run verification baseline suite ⬜
 Establish a true green baseline BEFORE any refactoring (the Codex handoff batch was never fully validated after concurrent edits).
-- [ ] `npm test` (unit, Monte Carlo, API — expect 36 tests, 35 pass, 1 skipped)
+- [ ] `npm test` (unit, Monte Carlo, API — expect 104 tests, 103 pass, 1 skipped)
 - [ ] `npm run test:e2e` (general + Strategy Copilot, 12 tests)
 - [ ] `node --test test/trade-replay-e2e.test.mjs` (9 tests)
 - [ ] `node test/check-console-errors.mjs` (0 errors across all 9 tabs)
@@ -63,12 +63,23 @@ Was the highest-consequence gap for a public demo: any throw unmounted the whole
 - [ ] Rename to `chartInterval` / `setChartInterval` across `trading-desk.tsx` (mechanical, type-checked)
 - [ ] Add an ESLint rule (or comment guard) so a future local `setInterval`/`setTimeout` shadow is flagged
 
-## 8. Rate-limit the AI endpoints 🔴 (new exposure since going public) ⬜
-The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backtest` and `/api/copilot/chat` have **no server-side throttle** — the only cooldown is `goriee.ai-cooldown.v1` in localStorage, which is trivially bypassed. Each request can also occupy a function for up to 300s of billable duration against Hobby concurrency limits.
-- [ ] Add a per-IP (or per-session) rate limit in front of the three LLM routes; return `429` with `Retry-After` so the existing client-side 429 handling (`ai-errors.ts:9,15`) picks it up
-- [ ] Cap concurrent in-flight LLM requests globally
-- [ ] Cap `includeWebResearch` fan-out, which multiplies upstream cost per call
-- [ ] Note: input validation is already solid (symbol regex, interval whitelist, 600-char question slice) — this is about volume, not shape
+## 8. Rate-limit the AI endpoints 🔴 (new exposure since going public) ✅ DONE — committed 2026-09-28
+The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backtest` and `/api/copilot/chat` had **no server-side throttle** — the only cooldown was `goriee.ai-cooldown.v1` in localStorage, trivially bypassed. Shipped, typecheck-clean, `next build` green, 26 new unit tests, and the 429 contract proven live on dev **and** production at zero provider cost.
+- [x] Add a per-IP (or per-session) rate limit in front of the three LLM routes; return `429` with `Retry-After` so the existing client-side 429 handling (`ai-errors.ts:9,15`) picks it up
+- [x] Cap concurrent in-flight LLM requests globally
+- [x] Cap `includeWebResearch` fan-out, which multiplies upstream cost per call
+- [x] Note: input validation is already solid (symbol regex, interval whitelist, 600-char question slice) — this is about volume, not shape
+
+**What actually shipped:**
+- `src/lib/ai-rate-limit.ts` — zero-import module (so Node's type-stripping can unit-test it): fixed per-minute (6) + per-hour (40) windows plus a concurrency cap (4) per client key; in-memory `Map` store behind a `RateLimitStore` interface with `setRateLimitStore()` as the Redis swap seam; `MAX_TRACKED_KEYS = 10_000` prune so the Map can't grow unbounded; env overrides `AI_RATE_LIMIT_PER_MINUTE/_PER_HOUR/_CONCURRENCY` and `AI_RATE_LIMIT_DISABLED=1` (read per call, junk falls back to defaults); `clientKeyFromHeaders()` parses `x-forwarded-for` → `x-real-ip` → `"local"` (Next 16 has no `request.ip`).
+- `src/lib/ai-limit-response.ts` — `guardAiRequest(headers, cost)` returns either `{ allowed, release, remaining }` or a ready-made `429` `NextResponse` with `Retry-After` and the body `{ error, retryAt }` the existing client chain already understands.
+- Wiring: guards sit **after input validation** on all three routes (invalid input never spends budget) and release in `finally` — including every stream-exit path in `/api/copilot/chat` (stream `finally`, `cancel()`, early error returns); release is idempotent. `includeWebResearch` costs 2 against the minute budget.
+- Denial copy deliberately avoids the strings "429"/"rate limit" and starts with "The desk is …" so `researchErrorMessage` in `desk-shared.ts` passes it through untouched (new first-line guard) instead of rewriting it into provider-error copy.
+- `test/rate-limit.test.mjs` — 26 tests (budget windows, lockout non-extension, concurrency slots, header parsing, env parsing, store seam, message guard), registered in `test`, `test:unit`, `test:all`.
+- **Verified live:** six cheap post-guard 400s exhaust `perMinute: 6`; the 7th request → `429` + `Retry-After` + identical `retryAt` on all three routes (guard fires before any provider contact). Same drill repeated against production after deploy.
+- **Documented limitation:** the counter is per server instance. Fine on dev and on Vercel's single bundled lambda today; a multi-instance/multi-region topology needs the Redis seam (`setRateLimitStore`).
+- `request-recovery.tsx` copy corrected: the countdown line no longer claims "the provider may still have a daily quota" (wrong when our own limiter is the source) — now "Pacing protects the shared AI budget."
+
 
 ## 9. Pause polling when hidden + enforce quote staleness 🟠 ⬜
 Zero `navigator.onLine` / `visibilitychange` / `document.hidden` usage anywhere in `src/**`. Three independent 60s loops (`trading-desk.tsx:404`, `:674`, `:705`) plus the 3s orderbook recursion (`orderbook-panel.tsx:40`) keep firing in background tabs.
@@ -98,8 +109,10 @@ There is already one good shared effect at `trading-desk.tsx:851-871` that handl
 - [ ] The `15m / 1H / 4H / 1D` picker is hand-rolled in 6 distinct places — 3 `<select>`s (`:2463`, `:2765`, `:3208`) and 3 button groups (`:3820`/`:3841`/`:3862`/`:3883`, `:3968`, `:5655`/`:5668`/`:5681`) — extract `<IntervalPicker>`
 - [ ] Remove the single `as any` at `price-chart.tsx:688` (touch-event compat) with a proper union type — it's the only type escape in `src/**`
 
-## 13. Share metadata + server-side caching 🟢 ⬜
-- [ ] `layout.tsx` has only `title` + `description` — add `openGraph`, `twitter:card`, an OG image, `metadataBase` and `themeColor`. Posting the live link to Discord/X/LinkedIn currently renders as a bare URL with no preview. Cheapest high-visibility win for judging.
+## 13. Share metadata + server-side caching 🟢 ⬜ (metadata half DONE — committed 2026-09-28; caching half open)
+- [x] `layout.tsx` has only `title` + `description` — add `openGraph`, `twitter:card`, an OG image, `metadataBase` and `themeColor`. Posting the live link to Discord/X/LinkedIn currently renders as a bare URL with no preview. Cheapest high-visibility win for judging.
+  - **Shipped:** `src/app/layout.tsx` now exports full `metadata` (`metadataBase`, `openGraph`, `twitter`, `robots`) plus a separate `export const viewport: Viewport = { themeColor: "#f2f5f2" }` (Next 14+ deprecated `themeColor` inside `metadata`). `src/app/opengraph-image.tsx` (file-convention Route Handler) renders a 1200×630 PNG via `ImageResponse` from `next/og`; twitter inherits the OG image automatically (no `twitter-image` file needed — proven in `next/dist/lib/metadata/resolve-metadata.js`). Verified in production: all `og:*`/`twitter:*`/`theme-color` tags present and the PNG serves 200.
+  - **Satori (`next/og`) hard constraints learned the hard way** (each broke the render with `failed to pipe response`): (1) glyphs outside the bundled font (e.g. `✦`) trigger a dynamic-font fetch that 400s; (2) CSS `transform` is unsupported; (3) `<br/>` is unsupported — use stacked divs. Stick to plain shapes, text and flexbox.
 - [ ] `next.config.ts` is literally `{}` and `bitgetGet` uses `cache: "no-store"` (`bitget.ts:56`, `:143`) — every visitor independently hammers Bitget for the same slowly-changing scanner/tickers/tokens data. Add a short TTL cache or `revalidate` on `/api/scanner`, `/api/tickers` and `/api/tokens` to cut both Bitget 429s and Vercel invocations.
 
 ## Housekeeping ✅ DONE — was URGENT, committed 2026-09-28

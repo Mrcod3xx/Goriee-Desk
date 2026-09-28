@@ -2,8 +2,8 @@
 
 > **Additional handoff (September 25):** Read [CODEX_HANDOFF_2026-09-25.md](CODEX_HANDOFF_2026-09-25.md) for the interrupted Codex reliability/backup/workflow batch, remaining issues and its limited verification. The historical test status below does not establish that this newer batch or concurrent edits are verified.
 
-**Last Updated:** September 28, 2026 (Vercel production deploy + timeout ceiling raise)  
-**Status:** LIVE at https://goriee-ai-desk.vercel.app (public, AI verified end-to-end). `npm test` green: 36 tests, 35 pass, 0 fail, 1 skipped (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`, later `4fcb674`). Refinement backlog in [TODO.md](TODO.md).  
+**Last Updated:** September 28, 2026 (AI rate limits + social metadata shipped to production)  
+**Status:** LIVE at https://goriee-ai-desk.vercel.app (public, AI verified end-to-end). `npm test` green: **104 tests, 103 pass, 0 fail, 1 skipped** (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`, later `4fcb674`, `d7c17ee`). Refinement backlog in [TODO.md](TODO.md).  
 **Stack:** Next.js 16.3.6 (App Router, Turbopack), React 19.3.0, TypeScript 7, Vanilla CSS design system, Bitget Public Spot API.
 
 ---
@@ -663,5 +663,34 @@ TODO item 6, chosen first of the 13 backlog items because it was the only gap th
 - TODO item 9 overstated staleness: bracket triggers ARE gated (`:734-735`, 3 passing tests in `test/bracket-lifecycle.test.mjs`), `:1186` gates market data, `:5410` renders the indicator. **Only the alert-hit effect at `:712-716` is genuinely ungated.**
 - TODO item 6 overstated growth: journal (30) / playbooks (30) / rule-runner logs (15) / watchlist (50) were already capped. Genuinely uncapped: `paperTrades` (must stay — see finding 1), `paperAlerts`, copilot session arrays.
 - CSS: appended `.desk-fatal-*`, `.desk-panel-error*`, `.desk-boot-*` banners at the end of `globals.css` (13,524 → 13,744 lines), reusing existing `fadeIn`/`skeleton-wave`/`spin` keyframes; the global `prefers-reduced-motion` rule at `:3689` covers them, so no new one was added.
+
+## 🔒 27. Server-Side AI Rate Limits + Social Metadata (September 28, 2026)
+
+TODO items **8** (rate limits, 🔴) and the metadata half of **13** (OG/twitter tags + OG image), shipped together per the user's confirmed design decisions: store = in-memory module-level `Map` behind an interface (Redis-swappable), and yes, bundle the OG work. **Commits:** `d79eae6` (rate limits, 9 files), `a0f3c96` (metadata, 2 files), plus the docs commit carrying this section.
+
+### New files
+| File | Purpose |
+|---|---|
+| `src/lib/ai-rate-limit.ts` | Zero-import limiter (testable under `node --test`): fixed per-minute (6) + per-hour (40) windows + concurrency cap (4) per client key. `RateLimitStore` interface + `createMemoryStore()` (Map keyed `"${key}:${windowMs}"`, prunes expired-first then oldest, `MAX_TRACKED_KEYS = 10_000`) + `setRateLimitStore()` Redis seam. `aiBudgetFromEnv()` reads `AI_RATE_LIMIT_PER_MINUTE/_PER_HOUR/_CONCURRENCY` per call (junk → defaults) and `AI_RATE_LIMIT_DISABLED=1` → unlimited. `clientKeyFromHeaders()` = first `x-forwarded-for` entry → `x-real-ip` → `"local"` (Next 16 has **no `request.ip`**). Denials never extend the lockout. |
+| `src/lib/ai-limit-response.ts` | `guardAiRequest(headers, cost)` → `{ allowed, release, remaining }` or a ready `429` `NextResponse` with `Retry-After` + body `{ error, retryAt }` (the shape the existing client 429 chain already consumes). |
+| `src/app/opengraph-image.tsx` | File-convention Route Handler rendering a 1200×630 PNG via `ImageResponse` from `next/og`; exports `size`, `contentType`, `alt`. Build-cached (prerendered static) since it uses no Request-time APIs. |
+| `test/rate-limit.test.mjs` | 26 tests: budget windows, lockout non-extension, concurrency slots, header parsing, env parsing, store seam, `researchErrorMessage` passthrough. Suite now **104 / 103 pass / 0 fail / 1 skipped**. |
+
+### Wiring & client chain
+- Guards sit **after input validation** on `/api/research` (cost 2 with `includeWebResearch`, else 1), `/api/backtest` (cost 1) and `/api/copilot/chat` (cost 1) — invalid input never spends budget. Release is idempotent and runs in `finally` on every path, including each stream-exit in copilot (stream `finally`, `cancel()`, early error returns).
+- Denial copy starts with **"The desk is …"** and avoids the strings "429"/"rate limit"; `researchErrorMessage` in `desk-shared.ts` got a first-line `/^The desk is /i` passthrough guard so limiter copy isn't rewritten into provider-error copy.
+- No frontend changes were needed for 429 handling: `llm.ts` → `ai-errors.ts` → `setAiRetryAt` → persisted cooldown → `<RequestRecovery>` already covered provider 429s; our 429 body reuses the same `retryAt` contract. One copy fix: `request-recovery.tsx` no longer claims "the provider may still have a daily quota" (wrong when our limiter is the source) → "Pacing protects the shared AI budget."
+- **Documented limitation:** counters are per server instance. Fine on dev and on Vercel's single bundled lambda (fluid compute, §22); a multi-instance/multi-region topology must swap in the Redis seam.
+
+### Metadata (`src/app/layout.tsx`)
+- Full `metadata`: `metadataBase` (`NEXT_PUBLIC_SITE_URL` ?? prod URL), `openGraph`, `twitter: { card: "summary_large_image", … }`, `robots`; **separate `export const viewport: Viewport = { themeColor: "#f2f5f2" }`** — `themeColor` inside `metadata` is deprecated since Next 14.
+- **Twitter inherits OG images automatically** (proven in `next/dist/lib/metadata/resolve-metadata.js`: `if (!hasTwImages) autoFillProps.images = openGraph.images`) → no `twitter-image.tsx` needed; the file-convention `opengraph-image` feeds both.
+- **Satori (`next/og`) hard constraints — each broke the render with `failed to pipe response` (client sees "connection closed unexpectedly"; server log: `.next/dev/logs/next-development.log`):** (1) glyphs outside the bundled font (e.g. `✦` U+2726) trigger a dynamic-font fetch that returns 400; (2) CSS `transform` is unsupported; (3) `<br/>` is unsupported (use stacked divs). Stick to plain shapes, text, flexbox. Palette must be hard-coded — `globals.css` is not loaded in the OG render context.
+
+### Verification
+- **Dev:** six cheap post-guard 400s exhausted `perMinute: 6`; 7th → `429` + `Retry-After: 60` + identical `retryAt` across all three routes (guard fires before any provider contact). Head tags + PNG (200, ~70 KB) verified visually.
+- **Prod:** `vercel deploy --prod --yes` → **`dpl_C9ykcjZCGYhQkzxQAxioNVyTzpXA`** (deployment URL `goriee-ai-desk-bg40w9uyp-…`), Ready and aliased. All `og:*`/`twitter:*`/`theme-color` tags present with `og:image` = `https://goriee-ai-desk.vercel.app/opengraph-image?<hash>`; PNG 200. Same fast drill in prod: req 1–6 = 400 (post-guard), req 7–8 = `429` with `Retry-After` 59/58 and a stable `retryAt`.
+- **Drill gotcha:** slow full-backtest requests (~15s each) record their hit at request *start*, so sequential slow requests land in different fixed-minute windows and never trip the minute budget — use cheap post-guard 400 payloads for 429 drills.
+- **Ops gotchas:** only ONE `next dev` per directory (a second instance exits pointing at the first's PID); PowerShell occasionally drops a leading `$var = …` assignment when a line starts with a stray control char (inline literals instead); `& "path\vercel.cmd"` was rejected once by the parser — plain `vercel.cmd` from PATH works.
 
 
