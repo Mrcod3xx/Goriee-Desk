@@ -167,6 +167,16 @@ export type DataFeedInput = {
    * saving as a data outage would be worse than saying nothing.
    */
   paused?: boolean;
+  /**
+   * True until the very first quote has arrived.
+   *
+   * Also suppresses `stalled`, but for the opposite reason: before the first
+   * fetch resolves an `Infinity` age means "nothing yet", not "nothing for two
+   * minutes". Conflating the two is what made the first cut of this feature
+   * prerender an amber `role="alert"` badge beside a "Loading market data"
+   * spinner on every page load.
+   */
+  awaitingFirstQuote?: boolean;
   /** Override for the staleness threshold. Defaults to `MAX_QUOTE_AGE_MS`. */
   maxAgeMs?: number;
 };
@@ -178,13 +188,26 @@ export type DataFeedInput = {
  * symptom, so it wins; a stalled feed explains a missing WebSocket tick, so it
  * comes next. Reporting the most specific cause first is what stops the badge
  * from claiming "WS Live" while no data has arrived for ten minutes.
+ *
+ * Two conditions suppress `stalled` and nothing else: an intentional
+ * suspension (`paused`) and a feed that has never delivered a quote
+ * (`awaitingFirstQuote`). Both make the quote age meaningless rather than
+ * alarming. `offline` still wins under both, because connectivity is known
+ * independently of the market data — a user with no internet should get the
+ * banner on first paint, not a minute later.
  */
 export function resolveDataFeedState(input: DataFeedInput): DataFeedState {
-  const { online, wsConnected, paused = false, maxAgeMs = MAX_QUOTE_AGE_MS } = input;
+  const {
+    online,
+    wsConnected,
+    paused = false,
+    awaitingFirstQuote = false,
+    maxAgeMs = MAX_QUOTE_AGE_MS,
+  } = input;
   const age = Number.isFinite(input.quoteAgeMs) ? input.quoteAgeMs : Infinity;
 
   if (!online) return "offline";
-  if (!paused && age > maxAgeMs) return "stalled";
+  if (!awaitingFirstQuote && !paused && age > maxAgeMs) return "stalled";
   if (wsConnected) return "live";
   return "polling";
 }

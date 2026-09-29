@@ -1544,6 +1544,14 @@ export default function TradingDesk() {
     wsConnected: wsStatus === "connected",
     quoteAgeMs: market ? quoteAgeMs(market.asOf, clockNow) : Infinity,
     paused: !pollingEnabled,
+    /*
+      A null `market` means the first fetch has not resolved, so the Infinity
+      above means "no data yet" rather than "no data for two minutes". Keying
+      this off `!market` instead of `marketLoading` is deliberate: it depends
+      only on whether we hold data, so a loading flag left stuck true cannot
+      silently disable stall detection for the whole session.
+    */
+    awaitingFirstQuote: !market,
     maxAgeMs: MAX_QUOTE_AGE_MS,
   });
   const feed = connection.presentation;

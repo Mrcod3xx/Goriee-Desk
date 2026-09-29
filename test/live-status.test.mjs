@@ -287,6 +287,71 @@ describe("resolveDataFeedState", () => {
     assert.equal(resolveDataFeedState({ online: true, wsConnected: true, quoteAgeMs: 5_000, maxAgeMs: 1_000 }), "stalled");
     assert.equal(resolveDataFeedState({ online: true, wsConnected: true, quoteAgeMs: 500, maxAgeMs: 1_000 }), "live");
   });
+
+  /*
+    Regression guard for the bug that shipped in 07a2f64. Before the first
+    fetch resolves, `market` is null and the call site passes Infinity — which
+    this resolver then read as "no data for two minutes" and reported an amber
+    role="alert" "Data Stalled" badge beside a "Loading market data" spinner,
+    on every single page load. It was visible in the *prerendered* HTML, so it
+    was not even a hydration flash — it was the first thing a visitor saw.
+  */
+  describe("first paint (no quote has arrived yet)", () => {
+    const firstPaint = { online: true, wsConnected: false, quoteAgeMs: Infinity, awaitingFirstQuote: true };
+
+    test("THE BUG THIS CLOSED: an awaiting feed is not stalled", () => {
+      assert.notEqual(resolveDataFeedState(firstPaint), "stalled");
+      // Matches the pre-feature behaviour: `wsStatus` starts as "connecting",
+      // so the old binary badge rendered the REST Polling variant here.
+      assert.equal(resolveDataFeedState(firstPaint), "polling");
+      assert.equal(dataFeedPresentation(resolveDataFeedState(firstPaint)).label, "REST Polling");
+    });
+
+    test("first paint is announced as status, never as alert", () => {
+      assert.equal(dataFeedPresentation(resolveDataFeedState(firstPaint)).role, "status");
+    });
+
+    test("first paint raises no banner", () => {
+      assert.equal(dataFeedPresentation(resolveDataFeedState(firstPaint)).banner, false);
+    });
+
+    test("awaiting suppresses stalled regardless of socket state", () => {
+      assert.equal(resolveDataFeedState({ ...firstPaint, wsConnected: true }), "live");
+      assert.equal(resolveDataFeedState({ ...firstPaint, quoteAgeMs: NaN }), "polling");
+    });
+
+    test("awaiting never masks offline — connectivity is known independently", () => {
+      // A user with no internet should get the banner on first paint, not only
+      // once a fetch has had a chance to time out.
+      assert.equal(resolveDataFeedState({ ...firstPaint, online: false }), "offline");
+      assert.equal(dataFeedPresentation(resolveDataFeedState({ ...firstPaint, online: false })).banner, true);
+    });
+
+    test("a feed that HAS delivered and then aged out still reports stalled", () => {
+      // The guard must be scoped to first paint only. If awaitingFirstQuote
+      // were sticky, stall detection would be silently disabled forever — the
+      // exact class of bug the feature exists to prevent.
+      assert.equal(
+        resolveDataFeedState({ online: true, wsConnected: true, quoteAgeMs: Infinity, awaitingFirstQuote: false }),
+        "stalled"
+      );
+      assert.equal(
+        resolveDataFeedState({ online: true, wsConnected: false, quoteAgeMs: 999_000, awaitingFirstQuote: false }),
+        "stalled"
+      );
+    });
+
+    test("the flag defaults to false so existing callers keep detecting stalls", () => {
+      // Every call that omits it must behave exactly as before the fix.
+      assert.equal(resolveDataFeedState({ online: true, wsConnected: true, quoteAgeMs: Infinity }), "stalled");
+      assert.equal(resolveDataFeedState({ online: true, wsConnected: false, quoteAgeMs: Infinity }), "stalled");
+    });
+
+    test("awaiting and paused are independent suppressions", () => {
+      assert.equal(resolveDataFeedState({ ...firstPaint, paused: true }), "polling");
+      assert.equal(resolveDataFeedState({ online: true, wsConnected: true, quoteAgeMs: Infinity, paused: true }), "live");
+    });
+  });
 });
 
 describe("dataFeedPresentation", () => {

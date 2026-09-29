@@ -85,6 +85,7 @@ export function useConnectionStatus(input: {
   wsConnected: boolean;
   quoteAgeMs: number;
   paused?: boolean;
+  awaitingFirstQuote?: boolean;
   maxAgeMs?: number;
 }): ConnectionStatus {
   const online = useOnlineStatus();
@@ -97,6 +98,7 @@ export function useConnectionStatus(input: {
     // Nothing can go stale while we are not polling, and nothing can go stale
     // while the tab is hidden either — both are intentional suspensions.
     paused: input.paused ?? !visible,
+    awaitingFirstQuote: input.awaitingFirstQuote,
     maxAgeMs: input.maxAgeMs,
   });
 
