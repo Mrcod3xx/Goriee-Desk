@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { bitgetRequest } from "@/lib/bitget-http";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 
 export type SpotInstrument = {
   symbol: string;
@@ -11,17 +13,9 @@ export type SpotInstrument = {
 
 export async function GET() {
   try {
-    const response = await fetch(
-      "https://api.bitget.com/api/v3/market/instruments?category=SPOT",
-      { cache: "no-store", signal: AbortSignal.timeout(9000) },
+    const payload = await bitgetRequest<Array<Partial<SpotInstrument>>>(
+      "/api/v3/market/instruments?category=SPOT",
     );
-    if (!response.ok) throw new Error(`Bitget returned HTTP ${response.status}.`);
-    const payload = (await response.json()) as {
-      code?: string;
-      msg?: string;
-      data?: Array<Partial<SpotInstrument>>;
-    };
-    if (payload.code && payload.code !== "00000") throw new Error(payload.msg || "Bitget error.");
 
     const instruments = (payload.data ?? [])
       .filter((instrument) => instrument.status === "online" && instrument.quoteCoin === "USDT")
@@ -42,7 +36,6 @@ export async function GET() {
 
     return NextResponse.json({ instruments, asOf: Date.now() });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Bitget markets could not be loaded.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return bitgetErrorResponse(error, "Bitget markets could not be loaded.");
   }
 }

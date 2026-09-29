@@ -718,6 +718,41 @@ Closed TODO item 9 and the WebSocket half of item 10. **Chosen first** because i
 - **`bitget-ws.ts`** — `scheduleReconnect()` adds exponential backoff + **equal jitter** (half deterministic, half random — pure full jitter can return ~0 and defeats backoff) + the attempt cap; `onopen` resets the counter; reconnect suspends while hidden and re-arms on `visibilitychange` + `online`; `isDisposed` flag guards post-unmount timers. **Flicker fixed:** `onerror` no longer sets status — the WebSocket spec fires `onclose` after every `onerror`, so the old `onerror`→`"fallback"` then `onclose`→`"offline"` flip was the badge flickering on every retry.
 - **CSS** appended at EOF of `globals.css` under a `FEATURE: Connection awareness` banner (repo convention §26/§27): stalled/offline colours, amber (static — "a pulsing amber reads as working, but stalled means data has stopped") + red pulse dots, `.feed-offline-banner`, `.status-suspended` pill, `.live-pulse-dot.paused`. No separate reduced-motion block needed — the global rule at `:3689` already neutralises the new animations.
 - **Tests:** new `test/live-status.test.mjs` — 53 tests / 10 suites, registered in `test`, `test:unit`, and `test:all`. Full suite now **157 tests / 156 pass / 1 skipped / 0 fail** (was 104/103/1). Typecheck exit 0; production build green, 12 static pages unchanged.
-- **Still open (item 10 remainder):** honor `Retry-After` in `bitget.ts:61-63` instead of fixed 300ms×2; replace the brittle `String(error).includes("429")` at `bitget.ts:76` with a typed error; collapse the `WsConnectionStatus` union (`"connecting"` and `"offline"` render identically as "REST Polling").
+
+## 🛡️ 30. Live-Data Resilience — Typed Errors, Real Backoff, One Request Path (September 29, 2026)
+
+Closed TODO item **10** (the remainder §29 left open). **Chosen first** because it was the only remaining open item where the app was *actively doing the wrong thing for every user today*: retrying a 429 after a fixed **300 ms** — against a Bitget rate-limit window measured in **seconds** — burned both retries and *added* load, amplifying the very 429s that blank the scanner, watchlist and order book. Every failure then collapsed into an indistinguishable `502` with the upstream `Retry-After` discarded, and `"connecting"` / `"offline"` rendered identically, so the status badge from §29 could not be honest about the socket.
+
+### New files
+| File | Purpose |
+|---|---|
+| `src/lib/bitget-http.ts` | The **single** Bitget request path. Deliberately zero-import (no `@/`, no `next/server`, no React/DOM) so Node's type stripping can unit-test it — same seam as `ai-rate-limit.ts` / `live-status.ts` / `safe-storage.ts`. `bitgetRequest<T>(path, options)` with `fetchImpl` / `sleep` / `now` / `random` all injectable, so the retry loop is assertable offline in fixed virtual time. |
+| `src/lib/bitget-response.ts` | Owns the HTTP shape (imports `next/server`) — mirrors the `ai-rate-limit.ts` ↔ `ai-limit-response.ts` precedent exactly. `bitgetErrorStatus(error)` and `bitgetErrorResponse(error, fallback)`. |
+| `test/bitget-http.test.mjs` | 56 tests / 5 suites, fully offline. Registered in `test`, `test:unit`, `test:all`. |
+
+### The four bugs fixed together
+1. **Fixed 300 ms × 2 retries.** Now exponential backoff with **equal jitter** (same choice as §29's WS reconnect — pure full jitter can return ~0 and defeats backoff): `RETRY_BASE_MS` 1s, `RETRY_MAX_MS` 5s, `BITGET_RETRIES` 2. A 429's `Retry-After` becomes a **floor** on the wait when it is longer than the schedule, never a ceiling (so a `Retry-After: 0` can't collapse the backoff).
+2. **`String(error).includes("429")`.** Gone, replaced by `BitgetRateLimitError` / `BitgetHttpError`. Two named regression guards cover the exact old failure modes: *"does not double-charge one 429 as two attempts"* (the catch block re-matched the `"Bitget returned HTTP 429"` message the function itself had just thrown) and *"does not retry on a message that merely contains the digits 429"* (e.g. a symbol named `BTCUSDT429XYZ`).
+3. **Everything was a 502.** `BitgetHttpError` now carries the **real** upstream status (400/500/503), and transport failures map `TimeoutError`/`AbortError` → **504** rather than a generic 502. A throttle exits as a genuine `429` + `Retry-After` + body `{ error, rateLimited, retryAt, retryAfterSeconds }`.
+4. **Four fetches bypassed every rule.** `getSpotScanMarkets`'s inline instruments call, `orderbook.ts:getSpotOrderBook` (**which had no retry at all**), `/api/tickers` and `/api/tokens` are now consolidated onto `bitgetRequest`.
+
+### Design decisions worth preserving
+- **`BitgetRateLimitError` is deliberately NOT a subclass of `BitgetHttpError`.** Consumers branch on throttles to forward `Retry-After`; a subclass would let an `instanceof BitgetHttpError` catch-all silently swallow that branch. `isBitgetRateLimitError` also matches by `error.name`, so a cross-realm copy (structuredClone, a serialized+rethrown error) still matches.
+- **`MAX_TOTAL_RETRY_WAIT_MS = 8_000` is the latency guarantee that matters.** A `Retry-After: 60` fails fast with an honest `retryAt` instead of parking a serverless function for a minute — every polling loop re-asks on its own schedule anyway. The budget is checked *before* sleeping (`totalWaitMs + delay <= maxTotalWaitMs`), so an oversized first wait does zero waits and one call. **The budget caps the schedule only**; it is *expected* to truncate a long `Retry-After`, and the tests assert exactly that.
+- **`parseRetryAfterMs` handles both forms** the spec allows — delta-seconds and HTTP-date — clamps negatives to 0 (never a negative `setTimeout`), and returns `null` for absent/empty/unparseable so the caller can fall back to `DEFAULT_RETRY_AFTER_SECONDS` (5).
+- **`bitgetRetryAfterSeconds` always returns ≥ 1**, so the outgoing `Retry-After` header is never `0` (which some clients read as "retry immediately").
+- **A non-finite `random()` falls back to the band midpoint** (0.5) rather than propagating `NaN` into `setTimeout`. Caught by the tests, not by review.
+- **`WsConnectionStatus` collapsed 4 → 2** (`"connected" | "polling"`) and the hook now returns `{ status, connected }`. Safe because *no consumer ever distinguished* the three non-connected states and all reconnect bookkeeping lives in refs that never read the value. Data health is `resolveDataFeedState`'s job (§29), not the socket's.
+- **`ai-errors.ts` is now rate-limit aware** — `aiErrorResponse` short-circuits to `{ status: 429, error, retryAt }` on `isBitgetRateLimitError` *before* the generic branch. This benefits `/api/research` and `/api/backtest`, which fetch candles from Bitget before calling the model, so a Bitget throttle there previously surfaced as provider-error copy.
+
+### Untouched on purpose
+`bitget-ws.ts`'s `onerror` no-op (§29: the spec fires `onclose` after every `onerror`; that pair *was* the badge flicker), `shouldPoll`'s visibility-only logic, the equal-jitter choice, and the raw-`market.asOf` staleness rule. All recorded in repo memory as deliberate.
+
+### Verification
+- `tsc --noEmit` exit 0 across the whole project.
+- Unit suite (9 files) **210 / 210 pass / 0 fail**; `api.test.mjs` **10 pass / 0 fail / 1 skipped** (unchanged — it spawns a real dev server and exercises six of the rewired routes).
+- `test` script total now **221 tests / 220 pass / 0 fail / 1 skipped** (was 165 / 164 / 1). ⚠️ Still never run `node --test test/` — Node treats bare `test/` as a module path → `MODULE_NOT_FOUND`.
+- **Follow-on win for item 13's caching half:** a TTL cache now belongs in one place (`bitgetRequest`) instead of five. Watch the `asOf` semantics — `live-status.ts` staleness needs real quote times, not cache-hit times.
+- **Item 10 remainder** (`Retry-After`, typed errors, the `WsConnectionStatus` union) shipped the same day — see **§30**.
 
 

@@ -1516,7 +1516,7 @@ export default function TradingDesk() {
     });
   }, []);
 
-  const { status: wsStatus } = useBitgetTickerWs({
+  const { connected: wsConnected } = useBitgetTickerWs({
     symbol,
     enabled: true,
     onTick: handleWsTick,
@@ -1541,7 +1541,7 @@ export default function TradingDesk() {
     saving as an outage.
   */
   const connection = useConnectionStatus({
-    wsConnected: wsStatus === "connected",
+    wsConnected,
     quoteAgeMs: market ? quoteAgeMs(market.asOf, clockNow) : Infinity,
     paused: !pollingEnabled,
     /*
@@ -2749,7 +2749,7 @@ export default function TradingDesk() {
                     </div>
                     <div className="focus-source">
                       <span className="source-label">Source</span>
-                      <strong>Bitget public API {wsStatus === "connected" ? "+ WebSocket Stream" : ""}</strong>
+                      <strong>Bitget public API {wsConnected ? "+ WebSocket Stream" : ""}</strong>
                       <span>
                         {market ? `Updated ${formatDate(market.asOf)}` : marketLoading ? "Fetching latest data" : "Waiting for connection"}
                         {!documentVisible && market ? " · paused while this tab is in the background" : ""}

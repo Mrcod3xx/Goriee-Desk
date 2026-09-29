@@ -1,4 +1,5 @@
 import { getSpotMarket, ema, rsi, macd, atr, type Candle } from "@/lib/bitget";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 import { NextRequest, NextResponse } from "next/server";
 
 export type HorizonAnalysis = {
@@ -187,7 +188,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ confluence: confluenceData });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to compute confluence.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return bitgetErrorResponse(error, "Failed to compute confluence.");
   }
 }

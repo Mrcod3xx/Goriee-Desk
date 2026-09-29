@@ -13,7 +13,23 @@ export type WsTickerTick = {
   ts: number;
 };
 
-export type WsConnectionStatus = "connected" | "connecting" | "offline" | "fallback";
+/**
+ * Everything the UI can actually render about the socket.
+ *
+ * This used to be a 4-state union (`connected | connecting | offline | fallback`),
+ * but no consumer ever told `connecting`, `offline` and `fallback` apart — the
+ * badge showed "REST Polling" for all three, which is the truth, since during
+ * every one of those windows prices really do arrive over REST polling.
+ * Carrying states the UI cannot render only invited the next reader to assume
+ * they were handled somewhere. Reconnect bookkeeping (`attempt`, the retry
+ * timer, disposal) lives in refs and never reads this value, so collapsing it
+ * changes no behaviour.
+ *
+ * Whether the *data* is healthy is a separate question, answered by
+ * `resolveDataFeedState` from quote age — a live socket carrying stale ticks
+ * should not be presented as "Live".
+ */
+export type WsConnectionStatus = "connected" | "polling";
 
 export function useBitgetTickerWs({
   symbol,
@@ -24,7 +40,7 @@ export function useBitgetTickerWs({
   enabled?: boolean;
   onTick: (tick: WsTickerTick) => void;
 }) {
-  const [status, setStatus] = useState<WsConnectionStatus>("connecting");
+  const [status, setStatus] = useState<WsConnectionStatus>("polling");
   const wsRef = useRef<WebSocket | null>(null);
   const pingTimerRef = useRef<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
@@ -33,7 +49,7 @@ export function useBitgetTickerWs({
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || !("WebSocket" in window)) {
-      setStatus("fallback");
+      setStatus("polling");
       return;
     }
 
@@ -81,20 +97,20 @@ export function useBitgetTickerWs({
       // entire attempt budget in the background and still be disconnected by
       // the time the user looked at it again. `visibilitychange` re-arms it.
       if (isHidden()) {
-        setStatus("offline");
+        setStatus("polling");
         return;
       }
 
       if (!shouldAttemptReconnect(attempt)) {
         // Out of attempts. REST polling in trading-desk covers the data, so
         // this is a graceful degradation, not a failure.
-        setStatus("fallback");
+        setStatus("polling");
         return;
       }
 
       const delay = nextReconnectDelayMs(attempt);
       attempt += 1;
-      setStatus("offline");
+      setStatus("polling");
       retryTimerRef.current = window.setTimeout(() => {
         retryTimerRef.current = null;
         if (!isDisposed) connect();
@@ -104,7 +120,10 @@ export function useBitgetTickerWs({
     const connect = () => {
       if (isDisposed) return;
       cleanupWs();
-      setStatus("connecting");
+      // Stays "polling" until `onopen` fires: the handshake gives the user
+      // nothing, and claiming a live stream before ticks arrive would make the
+      // badge lie for a second on every reconnect.
+      setStatus("polling");
 
       try {
         const socket = new WebSocket("wss://ws.bitget.com/v2/ws/public");
@@ -191,7 +210,7 @@ export function useBitgetTickerWs({
         };
       } catch (err) {
         console.warn("Could not initiate Bitget WebSocket:", err);
-        setStatus("fallback");
+        setStatus("polling");
       }
     };
 
@@ -232,5 +251,7 @@ export function useBitgetTickerWs({
     };
   }, [symbol, enabled]);
 
-  return { status };
+  // `connected` is the signal every consumer actually wanted; `status` stays for
+  // labels and logs so callers are not comparing strings to make decisions.
+  return { status, connected: status === "connected" };
 }

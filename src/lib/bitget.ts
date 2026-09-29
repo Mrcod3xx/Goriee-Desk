@@ -1,3 +1,7 @@
+// Relative import with an explicit `.ts` extension so Node's type stripping can
+// resolve it under `node --test` — the `@/` alias cannot be (see user memory).
+import { bitgetRequest, type BitgetEnvelope } from "./bitget-http.ts";
+
 export type Candle = {
   time: number;
   open: number;
@@ -38,47 +42,21 @@ const candleIntervalMs: Record<string, number> = {
   "1D": 24 * 60 * 60_000,
 };
 
-type BitgetEnvelope<T> = {
-  code?: string;
-  msg?: string;
-  requestTime?: number;
-  data?: T;
-};
-
 function number(value: unknown): number {
   const result = Number(value);
   return Number.isFinite(result) ? result : 0;
 }
 
-async function bitgetGet<T>(path: string, retries = 2): Promise<BitgetEnvelope<T>> {
-  try {
-    const response = await fetch(`https://api.bitget.com${path}`, {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(9000),
-    });
-
-    if (response.status === 429 && retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      return bitgetGet<T>(path, retries - 1);
-    }
-
-    if (!response.ok) {
-      throw new Error(`Bitget returned HTTP ${response.status}. Try again in a moment.`);
-    }
-
-    const payload = (await response.json()) as BitgetEnvelope<T>;
-    if (payload.code && payload.code !== "00000") {
-      throw new Error(payload.msg || "Bitget could not return market data.");
-    }
-    return payload;
-  } catch (error) {
-    if (retries > 0 && String(error).includes("429")) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      return bitgetGet<T>(path, retries - 1);
-    }
-    throw error;
-  }
+/**
+ * Single entry point for public Bitget REST calls.
+ *
+ * All retry, backoff, `Retry-After` handling and envelope validation lives in
+ * `bitget-http.ts` so that every caller — including `orderbook.ts`, which used
+ * to keep its own bare `fetch` — gets the same behaviour. Failures arrive here
+ * already typed as `BitgetRateLimitError` or `BitgetHttpError`.
+ */
+async function bitgetGet<T>(path: string): Promise<BitgetEnvelope<T>> {
+  return bitgetRequest<T>(path);
 }
 
 export async function getSpotMarket(
@@ -139,15 +117,7 @@ export async function getSpotMarket(
 
 export async function getSpotScanMarkets(): Promise<SpotScanMarket[]> {
   const [instrumentResponse, tickerResponse] = await Promise.all([
-    fetch("https://api.bitget.com/api/v3/market/instruments?category=SPOT", {
-      cache: "no-store",
-      signal: AbortSignal.timeout(9000),
-    }).then(async (response) => {
-      if (!response.ok) throw new Error(`Bitget returned HTTP ${response.status}. Try again in a moment.`);
-      const payload = (await response.json()) as BitgetEnvelope<Array<Record<string, unknown>>>;
-      if (payload.code && payload.code !== "00000") throw new Error(payload.msg || "Bitget could not return market data.");
-      return payload;
-    }),
+    bitgetGet<Array<Record<string, unknown>>>("/api/v3/market/instruments?category=SPOT"),
     bitgetGet<Array<Record<string, unknown>>>("/api/v3/market/tickers?category=SPOT"),
   ]);
   const tickers = new Map(

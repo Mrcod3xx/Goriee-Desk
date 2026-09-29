@@ -1,3 +1,7 @@
+// Relative `.ts` import, matching `bitget.ts`: keeps this module loadable under
+// Node's type stripping for `node --test`, which cannot resolve `@/`.
+import { bitgetRequest } from "./bitget-http.ts";
+
 export type OrderBookLevel = {
   price: number;
   size: number;
@@ -112,20 +116,9 @@ export async function getSpotOrderBook(symbol: string, limit = 15): Promise<Orde
     limit: String(safeLimit),
   });
 
-  const response = await fetch(`https://api.bitget.com/api/v3/market/orderbook?${query}`, {
-    cache: "no-store",
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(6000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Bitget order book API returned HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as RawBitgetDepthResponse;
-  if (payload.code && payload.code !== "00000") {
-    throw new Error(payload.msg || `Bitget could not return order book for ${safeSymbol}`);
-  }
+  const payload = await bitgetRequest<RawBitgetDepthResponse["data"]>(
+    `/api/v3/market/orderbook?${query}`,
+  );
 
   const rawAsks = payload.data?.a ?? [];
   const rawBids = payload.data?.b ?? [];

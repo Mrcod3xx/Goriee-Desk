@@ -1,4 +1,5 @@
 import { getSpotMarket, getHistoricalSpotCandles } from "@/lib/bitget";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 import { NextRequest, NextResponse } from "next/server";
 
 const allowedIntervals = new Set(["15m", "1H", "4H", "1D"]);
@@ -48,7 +49,6 @@ export async function GET(request: NextRequest) {
     const market = await getSpotMarket(symbol, interval, limit);
     return NextResponse.json({ market, source: "Bitget public spot API" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Market data is unavailable.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return bitgetErrorResponse(error, "Market data is unavailable.");
   }
 }

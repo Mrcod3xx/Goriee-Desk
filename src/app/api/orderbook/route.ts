@@ -1,4 +1,5 @@
 import { getSpotOrderBook } from "@/lib/orderbook";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -14,7 +15,8 @@ export async function GET(request: NextRequest) {
     const orderbook = await getSpotOrderBook(symbol, limit);
     return NextResponse.json({ orderbook, source: "Bitget L2 orderbook" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Order book data is unavailable.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // This panel polls every 3 seconds, so it is the caller most likely to hit
+    // Bitget's limit. A 429 + Retry-After lets it back off instead of hammering.
+    return bitgetErrorResponse(error, "Order book data is unavailable.");
   }
 }

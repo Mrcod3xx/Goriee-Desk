@@ -4,7 +4,9 @@
 >
 > **Items 6–13 added September 28, 2026** from a full read-only code review. They are refinements to *existing* functionality only — no new features. Quick wins that are small and independent of the monolith split: **6, 7, 8, 11**. Items **9, 10, 12** interact with the split and are best sequenced *with* item 2 rather than before it.
 >
-> **Update (later Sept 28): item 6 is DONE** — crash-safety shipped first because it was the only gap that could blank the entire app mid-demo (see item 6 for what shipped and for corrections to the original findings). Remaining 🔴 quick wins: **7, 8**.
+> **Update (later Sept 28): item 6 is DONE** — crash-safety shipped first because it was the only gap that could blank the entire app mid-demo (see item 6 for what shipped and for corrections to the original findings).
+>
+> **Update (Sept 29): items 8, 9 and 10 are DONE** — AI rate limiting, connection awareness / staleness, and live-data resilience (typed errors, real backoff, `Retry-After`, consolidated request path). Remaining 🔴 quick win: **7** (shadowed `setInterval` — latent, no current misbehavior).
 
 ## 1. Run verification baseline suite ⬜
 Establish a true green baseline BEFORE any refactoring (the Codex handoff batch was never fully validated after concurrent edits).
@@ -94,15 +96,27 @@ The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backte
 - **CSS** appended under a `FEATURE: Connection awareness` banner in `globals.css` (stalled/offline colours, amber+red pulse dots, offline banner, suspended pill, paused orderbook dot). Global reduced-motion rule already covers the new animations.
 - **Tests:** `test/live-status.test.mjs` — 53 tests across 10 suites, registered in `test` / `test:unit` / `test:all`. Full suite 157 tests / 156 pass / 1 skipped / 0 fail; typecheck clean; production build green.
 
-## 10. Harden live-data resilience 🟠 🔄 partially done (WS half shipped with item 9)
-The WebSocket half rode in with item 9 because it is the *same UI surface* — the badge can't be honest about the feed while the socket layer flickers and hammers. **Shipped:**
+## 10. Harden live-data resilience 🟠 ✅ DONE (Sept 29)
+**Why this was first:** the only remaining open item where the app was *actively doing the wrong thing for every user today*. Retrying a 429 after a fixed 300 ms — against a rate-limit window measured in seconds — burned both retries and *added* load, amplifying the very 429s that blank the scanner, watchlist and order book. Every failure then collapsed into an indistinguishable `502` with Bitget's own `Retry-After` thrown away, and `"connecting"` / `"offline"` rendered identically, so the status badge shipped in item 9 could not be honest about the socket.
+
+The WebSocket half rode in with item 9 because it is the *same UI surface* — the badge can't be honest about the feed while the socket layer flickers and hammers. **Shipped then:**
 - ✅ **Exponential backoff + equal jitter + attempt cap** in `bitget-ws.ts` `scheduleReconnect()` (~1,2,4,8,16,30,30,30s ≈ 2 min, then hands over to REST polling). `onopen` resets the attempt counter; reconnect suspends while the tab is hidden; re-arms on `visibilitychange` + `online`.
 - ✅ **Status flicker fixed:** `onerror` no longer touches status (the spec fires `onclose` after every `onerror`, so the old `onerror`→`"fallback"` then `onclose`→`"offline"` flip was the badge flickering on every retry).
 
-**Still open:**
-- [ ] Collapse the 4-state `WsConnectionStatus` union (`bitget-ws.ts:15`) into what the UI can actually render — `"connecting"` and `"offline"` are both displayed identically as "REST Polling"
-- [ ] `bitget.ts:61-63` retries 429s after a fixed 300ms × 2 — honor the `Retry-After` header and back off longer; real rate-limit windows exceed 300ms so the retry usually just fails again
-- [ ] Replace the brittle `String(error).includes("429")` check at `bitget.ts:76` with a typed error
+**Shipped now:**
+- [x] Collapse the 4-state `WsConnectionStatus` union (`bitget-ws.ts:15`) into what the UI can actually render — `"connecting"` and `"offline"` are both displayed identically as "REST Polling"
+- [x] `bitget.ts:61-63` retries 429s after a fixed 300ms × 2 — honor the `Retry-After` header and back off longer; real rate-limit windows exceed 300ms so the retry usually just fails again
+- [x] Replace the brittle `String(error).includes("429")` check at `bitget.ts:76` with a typed error
+
+**What actually shipped:**
+- **New `src/lib/bitget-http.ts`** — the single Bitget request path, deliberately zero-import (same seam as `ai-rate-limit.ts` / `live-status.ts`) so Node's type stripping can unit-test it with an injectable `fetchImpl` / `sleep` / `now` / `random`. Exponential backoff with **equal jitter** (1s base, 5s cap), `MAX_TOTAL_RETRY_WAIT_MS = 8s` total-wait budget, and `parseRetryAfterMs` supporting both delta-seconds and HTTP-date (clamped, never negative).
+- **Typed errors:** `BitgetHttpError` (carries the *real* upstream status — 400/500/503 — instead of flattening everything to 502; timeouts/aborts map to 504) and `BitgetRateLimitError` (429, carries `retryAfterMs` / `retryAt` / `attempts`). The rate-limit error is **deliberately not** a subclass of `BitgetHttpError`, so an `instanceof BitgetHttpError` catch-all can never swallow the throttle branch; `isBitgetRateLimitError` also matches by `name` for cross-realm copies.
+- **New `src/lib/bitget-response.ts`** — owns the HTTP shape (imports `next/server`, mirroring the `ai-rate-limit` ↔ `ai-limit-response` precedent): a throttle becomes a real `429` + `Retry-After` + `{ rateLimited, retryAt, retryAfterSeconds }` body instead of a generic 502.
+- **Four fetches that bypassed every retry/timeout rule are now consolidated** onto that path: `getSpotScanMarkets`'s inline instruments call, `orderbook.ts:getSpotOrderBook` (which previously had **no retry at all**), `/api/tickers`, and `/api/tokens`.
+- **`ai-errors.ts` is now rate-limit aware** — a Bitget throttle surfacing out of `/api/research` or `/api/backtest` (which fetch candles before calling the model) now reports 429 + `retryAt` rather than being rewritten into provider-error copy.
+- **`WsConnectionStatus` collapsed 4 → 2** (`"connected" | "polling"`); the hook now returns `{ status, connected }`. Safe because no consumer ever distinguished the three non-connected states and all reconnect bookkeeping lives in refs that never read the value. `trading-desk.tsx` updated at its three call sites; data health remains `resolveDataFeedState`'s job.
+- **Tests:** `test/bitget-http.test.mjs` — 56 tests across 5 suites, fully offline, registered in `test` / `test:unit` / `test:all`. Includes regression guards for the two specific old bugs: *"does not double-charge one 429 as two attempts"* (the string-match re-threw its own message into the retry catch) and *"does not retry on a message that merely contains the digits 429"*.
+- **Verified:** `tsc --noEmit` clean; unit suite 210/210 pass; `api.test.mjs` 10 pass / 0 fail / 1 skipped (unchanged). `test` script total now **221 tests / 220 pass / 0 fail / 1 skipped** (was 165/164/1).
 
 ## 11. Accessibility + UX consistency 🟢 ⬜
 There is already one good shared effect at `trading-desk.tsx:851-871` that handles Escape-close, body scroll-lock, and focus restore (`previouslyFocused?.focus()`) — but it only covers `selectedJournalItem`, `orderOpen` and `pickerOpen`.
@@ -122,7 +136,7 @@ There is already one good shared effect at `trading-desk.tsx:851-871` that handl
 - [x] `layout.tsx` has only `title` + `description` — add `openGraph`, `twitter:card`, an OG image, `metadataBase` and `themeColor`. Posting the live link to Discord/X/LinkedIn currently renders as a bare URL with no preview. Cheapest high-visibility win for judging.
   - **Shipped:** `src/app/layout.tsx` now exports full `metadata` (`metadataBase`, `openGraph`, `twitter`, `robots`) plus a separate `export const viewport: Viewport = { themeColor: "#f2f5f2" }` (Next 14+ deprecated `themeColor` inside `metadata`). `src/app/opengraph-image.tsx` (file-convention Route Handler) renders a 1200×630 PNG via `ImageResponse` from `next/og`; twitter inherits the OG image automatically (no `twitter-image` file needed — proven in `next/dist/lib/metadata/resolve-metadata.js`). Verified in production: all `og:*`/`twitter:*`/`theme-color` tags present and the PNG serves 200.
   - **Satori (`next/og`) hard constraints learned the hard way** (each broke the render with `failed to pipe response`): (1) glyphs outside the bundled font (e.g. `✦`) trigger a dynamic-font fetch that 400s; (2) CSS `transform` is unsupported; (3) `<br/>` is unsupported — use stacked divs. Stick to plain shapes, text and flexbox.
-- [ ] `next.config.ts` is literally `{}` and `bitgetGet` uses `cache: "no-store"` (`bitget.ts:56`, `:143`) — every visitor independently hammers Bitget for the same slowly-changing scanner/tickers/tokens data. Add a short TTL cache or `revalidate` on `/api/scanner`, `/api/tickers` and `/api/tokens` to cut both Bitget 429s and Vercel invocations.
+- [ ] `next.config.ts` is literally `{}` and every Bitget call goes through `bitgetRequest` with `cache: "no-store"` (`bitget-http.ts`) — every visitor independently hammers Bitget for the same slowly-changing scanner/tickers/tokens data. Add a short TTL cache or `revalidate` on `/api/scanner`, `/api/tickers` and `/api/tokens` to cut both Bitget 429s and Vercel invocations. **Now much cheaper to do:** item 10 consolidated all of them onto one request path, so a TTL cache can live in one place (`bitgetRequest`) instead of five. Watch the `asOf` semantics — `live-status.ts` staleness depends on them being real quote times, not cache-hit times.
 
 ## Housekeeping ✅ DONE — was URGENT, committed 2026-09-28
 The in-progress monolith split and the timeout work were sitting uncommitted while production had already been deployed from that tree, so git did not match the live site. All committed and pushed now.

@@ -1,3 +1,7 @@
+// Relative `.ts` import: this module is deliberately zero-import so Node's type
+// stripping can load it under `node --test`, and `@/` cannot be resolved there.
+import { isBitgetRateLimitError } from "./bitget-http.ts";
+
 export class AIRequestError extends Error {
   constructor(message: string, public status = 502, public retryAt: number | null = null) {
     super(message);
@@ -20,6 +24,11 @@ export function providerRetryAt(headers: Headers, now = Date.now()): number {
 export function aiErrorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "The request could not finish. Your input is saved; try again.";
   const timeout = error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name);
+  // These routes fetch market data before calling the model, so an upstream
+  // throttle used to arrive disguised as a generic 502 and lose its Retry-After.
+  if (isBitgetRateLimitError(error)) {
+    return { status: 429, error: message, retryAt: error.retryAt };
+  }
   return {
     status: error instanceof AIRequestError ? error.status : timeout ? 504 : 502,
     error: timeout ? "The provider took too long to respond. Your input is saved; try again or choose another model in Settings." : message,

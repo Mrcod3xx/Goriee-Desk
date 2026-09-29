@@ -1,4 +1,5 @@
 import { getSpotScanMarkets } from "@/lib/bitget";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +9,6 @@ export async function GET() {
     const markets = await getSpotScanMarkets();
     return NextResponse.json({ markets, asOf: Date.now(), source: "Bitget public spot API" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Bitget markets could not be scanned.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return bitgetErrorResponse(error, "Bitget markets could not be scanned.");
   }
 }

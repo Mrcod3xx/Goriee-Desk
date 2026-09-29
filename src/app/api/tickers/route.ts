@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { bitgetRequest } from "@/lib/bitget-http";
+import { bitgetErrorResponse } from "@/lib/bitget-response";
 
 const defaultSymbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 
@@ -12,17 +14,11 @@ export async function GET(request: NextRequest) {
   if (!symbols.length) return NextResponse.json({ quotes: [], asOf: Date.now() });
 
   try {
-    const response = await fetch(
-      "https://api.bitget.com/api/v3/market/tickers?category=SPOT",
-      { cache: "no-store", signal: AbortSignal.timeout(8000) },
+    // Shares the retry/backoff and `Retry-After` handling every other Bitget
+    // call uses; this one used to be a bare fetch with no retry at all.
+    const payload = await bitgetRequest<Array<Record<string, unknown>>>(
+      "/api/v3/market/tickers?category=SPOT",
     );
-    if (!response.ok) throw new Error(`Bitget returned HTTP ${response.status}.`);
-    const payload = (await response.json()) as {
-      code?: string;
-      msg?: string;
-      data?: Array<Record<string, unknown>>;
-    };
-    if (payload.code && payload.code !== "00000") throw new Error(payload.msg || "Bitget error.");
 
     const requestedSymbols = new Set(symbols);
     const asOf = Date.now();
@@ -36,7 +32,6 @@ export async function GET(request: NextRequest) {
       }));
     return NextResponse.json({ quotes, asOf });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Watchlist quotes are unavailable.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return bitgetErrorResponse(error, "Watchlist quotes are unavailable.");
   }
 }
