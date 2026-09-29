@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDocumentVisibility } from "@/components/use-live-status";
+import { shouldPoll } from "@/lib/live-status";
 import type { OrderBookData } from "@/lib/orderbook";
 
 type OrderBookPanelProps = {
@@ -12,8 +14,17 @@ export function OrderBookPanel({ symbol, onPickPrice }: OrderBookPanelProps) {
   const [data, setData] = useState<OrderBookData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const documentVisible = useDocumentVisibility();
+  // The tightest loop in the app: 3s, and it self-reschedules from `finally`,
+  // so it survived everything — including the tab being closed behind another
+  // window for hours. 1,200 requests/hour per parked tab against a single
+  // upstream rate limit the visible tab also needs. Gated like the desk's own
+  // loops; the effect re-running on tab-show fetches immediately, so returning
+  // users see fresh depth rather than a 3s-old snapshot.
+  const pollingEnabled = shouldPoll({ visible: documentVisible });
 
   useEffect(() => {
+    if (!pollingEnabled) return;
     let active = true;
     let timer: NodeJS.Timeout | null = null;
 
@@ -49,7 +60,7 @@ export function OrderBookPanel({ symbol, onPickPrice }: OrderBookPanelProps) {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [symbol]);
+  }, [symbol, pollingEnabled]);
 
   const bids = data?.bids.slice(0, 8) ?? [];
   const asks = (data?.asks.slice(0, 8) ?? []).slice().reverse(); // display lowest ask closest to midpoint
@@ -67,7 +78,22 @@ export function OrderBookPanel({ symbol, onPickPrice }: OrderBookPanelProps) {
           <p>Real-time Bitget order book &amp; micro-spread</p>
         </div>
         <div className="orderbook-meta">
-          <span className="live-pulse-dot" title="Live stream active" />
+          {/*
+            This panel polls REST every 3s; it never opened a WebSocket, so the
+            old `title="Live stream active"` described something that does not
+            exist — and kept claiming it while the tab was hidden and the data
+            was frozen. The title now states the real mechanism and the real
+            paused state, and the dot is dimmed while suspended so the panel
+            does not look live when it is not fetching.
+          */}
+          <span
+            className={`live-pulse-dot${pollingEnabled ? "" : " paused"}`}
+            title={
+              pollingEnabled
+                ? "Refreshing every 3s from the Bitget REST order book"
+                : "Paused while this tab is in the background — resumes automatically"
+            }
+          />
           <span className="orderbook-spread">
             {data ? (
               <>

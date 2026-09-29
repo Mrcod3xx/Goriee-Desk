@@ -13741,3 +13741,73 @@ html, body {
 @media (max-width: 860px) {
   .desk-boot-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ==========================================================================
+   FEATURE: Connection awareness — background-tab suspension + quote staleness
+   (TODO #9 and the WebSocket half of #10)
+
+   The badge used to be binary (WS Live / REST Polling) for four real states,
+   so "Bitget's socket is down" and "you have no internet" looked identical.
+   These classes render the two states that were missing, plus the banner and
+   the paused-dot treatment for the loops that now suspend while hidden.
+   Colors reuse the amber from .bracket-stale-badge and the red family from
+   .error-banner so staleness reads the same everywhere it appears.
+   ========================================================================== */
+
+/* Badge states. .ws-connected / .ws-fallback already existed above;
+   these complete the set produced by dataFeedPresentation(). */
+.ws-stalled { color: #fcd34d; }
+.ws-offline { color: #fca5a5; }
+
+/* Status dots. .pulse-dot-green / .pulse-dot-gray already existed.
+   The amber dot is static on purpose: a pulsing amber reads as "working",
+   but stalled means data has stopped arriving. Red pulses for offline
+   because that state has a banner demanding attention. */
+.pulse-dot-amber {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+.pulse-dot-red {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+  animation: pulseRed 1.6s infinite;
+}
+@keyframes pulseRed {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Offline banner. Reuses .error-banner for layout, spacing and the retry
+   button; this only shifts the palette from "something broke" to "you are
+   disconnected", which is the user's fault, not ours. */
+.feed-offline-banner {
+  border-color: #f3c9c9;
+  background: #fff7f7;
+}
+.feed-offline-banner strong { color: #7f2d2d; }
+.feed-offline-banner span { color: #8a5252; }
+
+/* Rule runner, third state: switched on but not evaluating because the tab is
+   hidden. Amber, matching the stalled badge, because it is a degradation
+   rather than a deliberate off. */
+.status-suspended {
+  background: #fef7e6;
+  color: #92610e;
+  border: 1px solid #f5d99a;
+}
+
+/* Orderbook dot while its 3s poll is suspended. Keeps the element in flow so
+   the heading does not reflow when the tab is shown again. */
+.live-pulse-dot.paused {
+  background: #94a3b8;
+  box-shadow: none;
+  animation: none;
+  opacity: .6;
+}

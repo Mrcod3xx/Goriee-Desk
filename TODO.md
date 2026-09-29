@@ -81,16 +81,25 @@ The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backte
 - `request-recovery.tsx` copy corrected: the countdown line no longer claims "the provider may still have a daily quota" (wrong when our own limiter is the source) — now "Pacing protects the shared AI budget."
 
 
-## 9. Pause polling when hidden + enforce quote staleness 🟠 ⬜
-Zero `navigator.onLine` / `visibilitychange` / `document.hidden` usage anywhere in `src/**`. Three independent 60s loops (`trading-desk.tsx:404`, `:674`, `:705`) plus the 3s orderbook recursion (`orderbook-panel.tsx:40`) keep firing in background tabs.
-- [ ] Gate polling on `document.hidden` and resume/refresh on `visibilitychange`
-- [ ] Listen for `online` / `offline` and surface a connection banner. Today the only status UI is the WS badge at `trading-desk.tsx:2497-2501`, which is **binary** — it renders only `ws-connected` vs `ws-fallback` and cannot distinguish "Bitget WS is down" from "you have no internet".
-- [ ] **Scope correction (verified Sept 28):** quote-staleness gating is *mostly already done*. Bracket triggers ARE gated (`trading-desk.tsx:734-735`: skips fills when `quoteAge > 120_000`, covered by three passing tests in `test/bracket-lifecycle.test.mjs`), market-data consumers are gated (`:1186`), and a visible staleness indicator exists (`:5410`). The **only genuinely ungated path is the alert-hit effect at `:712-716`** — gate that one on the same max-age check.
-- [ ] Same root as handoff item 5 (bracket stale-quote timestamping) in item 3 above — re-verify, don't reimplement
+## 9. Pause polling when hidden + enforce quote staleness 🟠 ✅ DONE (Sept 29)
+**Why this was first:** the only open item where the app was *silently doing the wrong thing for users today* — unbounded loops hammered Bitget + Vercel from every parked tab (a real path to Bitget 429s that degrade the *visible* product), a genuine correctness bug fired alerts on quotes of unbounded age and permanently stamped `triggeredAt`, and the status UI could not tell "Bitget's WS is down" from "you have no internet".
 
-## 10. Harden live-data resilience 🟠 ⬜
-- [ ] `bitget-ws.ts:147-149` reconnects on a flat 3000ms forever — add exponential backoff, jitter, and a max-attempts cap so a prolonged Bitget outage doesn't turn into an infinite reconnect hammer
-- [ ] Fix the status flicker: `onerror` sets `"fallback"` (`:140`, `:153`) while `onclose` sets `"offline"` (`:145`) then reconnects, so the badge can flip between states
+**What actually shipped:**
+- **New `src/lib/live-status.ts`** (zero-import, so Node's type stripping can test it directly): `MAX_QUOTE_AGE_MS`, `quoteAgeMs` (missing/future → `Infinity`, never `NaN`), `isQuoteActionable`, `describeQuoteAge`, `resolveDataFeedState` (offline > stalled > live > polling), `dataFeedPresentation` (label/colour/dot/banner/ARIA-role per state), `shouldPoll` (visibility only, deliberately not `navigator.onLine`), `isAlertTriggered`, plus reconnect backoff `nextReconnectDelayMs` / `shouldAttemptReconnect`.
+- **All *five* network loops gated on `shouldPoll`** — the three 60s loops (market, quotes, scanner), the 3s orderbook recursion, **and the 45s automated rule-runner** that neither the original TODO nor the Sept 28 scope correction mentioned (it fetches `/api/market` and can open/close positions, and background tabs are already browser-throttled to ~1/min after 5 min hidden, so it was silently unreliable). Every gate re-arms via a `resumeToken` that bumps on the `online` event.
+- **The alert correctness bug is fixed:** the alert-hit effect now routes through `isAlertTriggered`, which rejects quotes older than `MAX_QUOTE_AGE_MS`. Named repro captured in `test/live-status.test.mjs`.
+- **All inline `120_000` literals eliminated** — bracket effect, `placePaperOrder`, and the stale badge now share `isQuoteActionable` / `MAX_QUOTE_AGE_MS` with the alert path, so all four can't drift.
+- **Four-state status badge** (`ws-connected` / `ws-fallback` / `ws-stalled` / `ws-offline`) + an **offline banner** (outside the `ErrorBoundary`, with a "Retry now" button) + an honest 3-state rule-runner pill (Active / Suspended / Paused). Staleness reads **raw `market.asOf`**, not `effectiveMarket.asOf` (replay's clock is a historical candle close → would pin "Data Stalled" forever).
+- **New `src/components/use-live-status.ts`** — `useDocumentVisibility`, `useOnlineStatus`, `useConnectionStatus`, `useOnlineResumeToken` (bumps only on online false→true, never on mount).
+- **CSS** appended under a `FEATURE: Connection awareness` banner in `globals.css` (stalled/offline colours, amber+red pulse dots, offline banner, suspended pill, paused orderbook dot). Global reduced-motion rule already covers the new animations.
+- **Tests:** `test/live-status.test.mjs` — 53 tests across 10 suites, registered in `test` / `test:unit` / `test:all`. Full suite 157 tests / 156 pass / 1 skipped / 0 fail; typecheck clean; production build green.
+
+## 10. Harden live-data resilience 🟠 🔄 partially done (WS half shipped with item 9)
+The WebSocket half rode in with item 9 because it is the *same UI surface* — the badge can't be honest about the feed while the socket layer flickers and hammers. **Shipped:**
+- ✅ **Exponential backoff + equal jitter + attempt cap** in `bitget-ws.ts` `scheduleReconnect()` (~1,2,4,8,16,30,30,30s ≈ 2 min, then hands over to REST polling). `onopen` resets the attempt counter; reconnect suspends while the tab is hidden; re-arms on `visibilitychange` + `online`.
+- ✅ **Status flicker fixed:** `onerror` no longer touches status (the spec fires `onclose` after every `onerror`, so the old `onerror`→`"fallback"` then `onclose`→`"offline"` flip was the badge flickering on every retry).
+
+**Still open:**
 - [ ] Collapse the 4-state `WsConnectionStatus` union (`bitget-ws.ts:15`) into what the UI can actually render — `"connecting"` and `"offline"` are both displayed identically as "REST Polling"
 - [ ] `bitget.ts:61-63` retries 429s after a fixed 300ms × 2 — honor the `Retry-After` header and back off longer; real rate-limit windows exceed 300ms so the retry usually just fails again
 - [ ] Replace the brittle `String(error).includes("429")` check at `bitget.ts:76` with a typed error

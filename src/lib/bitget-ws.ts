@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { nextReconnectDelayMs, shouldAttemptReconnect } from "@/lib/live-status";
 
 export type WsTickerTick = {
   symbol: string;
@@ -37,7 +38,10 @@ export function useBitgetTickerWs({
     }
 
     let isDisposed = false;
+    let attempt = 0;
     const safeSymbol = symbol.toUpperCase().trim();
+
+    const isHidden = () => typeof document !== "undefined" && document.hidden === true;
 
     const cleanupWs = () => {
       if (pingTimerRef.current) {
@@ -62,6 +66,41 @@ export function useBitgetTickerWs({
       }
     };
 
+    /**
+     * Schedule the next reconnect attempt.
+     *
+     * Backoff is exponential with jitter rather than the previous flat 3s. The
+     * flat timer had two problems: every client that lost connectivity at once
+     * retried in lockstep the moment Bitget recovered, and it retried forever,
+     * so a tab left open on a dead network hammered the endpoint indefinitely.
+     */
+    const scheduleReconnect = () => {
+      if (isDisposed || retryTimerRef.current !== null) return;
+
+      // Suspend rather than schedule: a parked tab would otherwise burn the
+      // entire attempt budget in the background and still be disconnected by
+      // the time the user looked at it again. `visibilitychange` re-arms it.
+      if (isHidden()) {
+        setStatus("offline");
+        return;
+      }
+
+      if (!shouldAttemptReconnect(attempt)) {
+        // Out of attempts. REST polling in trading-desk covers the data, so
+        // this is a graceful degradation, not a failure.
+        setStatus("fallback");
+        return;
+      }
+
+      const delay = nextReconnectDelayMs(attempt);
+      attempt += 1;
+      setStatus("offline");
+      retryTimerRef.current = window.setTimeout(() => {
+        retryTimerRef.current = null;
+        if (!isDisposed) connect();
+      }, delay);
+    };
+
     const connect = () => {
       if (isDisposed) return;
       cleanupWs();
@@ -73,6 +112,9 @@ export function useBitgetTickerWs({
 
         socket.onopen = () => {
           if (isDisposed) return;
+          // A healthy connection resets the backoff, so the next drop starts
+          // from ~1s again instead of inheriting a grown delay.
+          attempt = 0;
           setStatus("connected");
 
           // Subscribe to SPOT ticker
@@ -135,18 +177,17 @@ export function useBitgetTickerWs({
           }
         };
 
+        // Intentionally does not touch `status`. The WebSocket spec fires
+        // `onclose` after every `onerror`, so setting state here produced two
+        // renders and a visible badge flicker for a single dropped socket.
+        // `onclose` owns the transition.
         socket.onerror = () => {
           if (isDisposed) return;
-          setStatus("fallback");
         };
 
         socket.onclose = () => {
           if (isDisposed) return;
-          setStatus("offline");
-          // Reconnect with 3s backoff
-          retryTimerRef.current = window.setTimeout(() => {
-            if (!isDisposed) connect();
-          }, 3000);
+          scheduleReconnect();
         };
       } catch (err) {
         console.warn("Could not initiate Bitget WebSocket:", err);
@@ -154,10 +195,39 @@ export function useBitgetTickerWs({
       }
     };
 
+    /**
+     * Re-arm after a suspension. Called on becoming visible and on `online`.
+     *
+     * The attempt counter resets so a tab returning from the background, or a
+     * network coming back, gets a full fresh budget rather than inheriting the
+     * "given up" state it was left in.
+     */
+    const rearm = () => {
+      if (isDisposed) return;
+      if (isHidden()) return;
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+      attempt = 0;
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      connect();
+    };
+
+    const handleVisibilityChange = () => {
+      if (isDisposed || isHidden()) return;
+      rearm();
+    };
+
     connect();
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("online", rearm);
 
     return () => {
       isDisposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("online", rearm);
       cleanupWs();
     };
   }, [symbol, enabled]);

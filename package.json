@@ -7,10 +7,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs test/api.test.mjs",
-    "test:unit": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs",
+    "test": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs test/live-status.test.mjs test/api.test.mjs",
+    "test:unit": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs test/live-status.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs test/copilot-e2e.test.mjs",
-    "test:all": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs test/api.test.mjs test/e2e.test.mjs test/copilot-e2e.test.mjs"
+    "test:all": "node --test test/unit.test.mjs test/monte-carlo-orderbook.test.mjs test/workspace-backup.test.mjs test/bracket-lifecycle.test.mjs test/paper-accounting.test.mjs test/safe-storage.test.mjs test/rate-limit.test.mjs test/live-status.test.mjs test/api.test.mjs test/e2e.test.mjs test/copilot-e2e.test.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",

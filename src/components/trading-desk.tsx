@@ -33,6 +33,8 @@ import type { View, ScannerSort, ScannerAssetType, Report, JournalItem, PaperRes
 import { DEFAULT_WATCHLIST, STARTING_CASH, STARTER_PLAYBOOKS, supportsBacktestWindow, storageKeys, formatPrice, formatScannerPrice, formatMoney, formatPercent, formatCompact, formatDuration, tradeStrategyLabel, formatDate, researchErrorMessage, safeRead } from "@/components/desk-shared";
 import { Icon } from "@/components/desk-icon";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { useConnectionStatus, useDocumentVisibility, useOnlineResumeToken } from "@/components/use-live-status";
+import { MAX_QUOTE_AGE_MS, describeQuoteAge, isAlertTriggered, isQuoteActionable, quoteAgeMs, shouldPoll } from "@/lib/live-status";
 import { safeRemove, safeWrite, safeWriteJson, subscribeToStorageFailures, registerQuotaRelief } from "@/lib/safe-storage";
 import type { StorageFailureReason } from "@/lib/safe-storage";
 import { relieveStorageQuota, describeDroppedStores } from "@/lib/storage-relief";
@@ -157,6 +159,28 @@ export default function TradingDesk() {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  /*
+    Background-tab and connectivity awareness.
+
+    Four independent loops used to keep firing while the tab was hidden: three
+    60s intervals below plus the 3s orderbook recursion. Every parked tab was
+    therefore a permanent source of Bitget calls and Vercel function
+    invocations producing data nobody was looking at — which also spent rate
+    limit that the *foreground* tab needed, so a handful of abandoned tabs
+    could push the visible one into HTTP 429s.
+
+    `pollingEnabled` is the single gate. It is in every loop's deps, so hiding
+    the tab tears the intervals down and showing it again re-runs the effect —
+    which fetches immediately instead of waiting out a stale interval. A user
+    returning after ten minutes sees a current price at once.
+
+    Declared up here, ahead of the loops that consume it, because the WebSocket
+    hook lives further down the file.
+  */
+  const documentVisible = useDocumentVisibility();
+  const pollingEnabled = shouldPoll({ visible: documentVisible });
+  const resumeToken = useOnlineResumeToken();
   const cooldownSeconds = Math.max(0, Math.ceil((aiRetryAt - clockNow) / 1000));
   const researchAbortRef = useRef<AbortController | null>(null);
   const backtestAbortRef = useRef<AbortController | null>(null);
@@ -437,6 +461,8 @@ export default function TradingDesk() {
   }, [pickerOpen, marketSearchOpen, tokensLoaded, tokenRetry]);
 
   useEffect(() => {
+    // Suspended entirely while the tab is hidden; see the pollingEnabled note.
+    if (!pollingEnabled) return;
     let current = true;
     const load = async () => {
       setMarketLoading(true);
@@ -464,7 +490,7 @@ export default function TradingDesk() {
       current = false;
       window.clearInterval(timer);
     };
-  }, [symbol, interval, refreshCount]);
+  }, [symbol, interval, refreshCount, pollingEnabled, resumeToken]);
 
   const cashBalance = useMemo(
     () => paperCash(paperTrades, paperFeeBps, STARTING_CASH),
@@ -704,6 +730,7 @@ export default function TradingDesk() {
   const dailyLossLimitReached = realizedStats.realizedToday <= -dailyLossLimit;
   useEffect(() => {
     if (!watchlistReady) return;
+    if (!pollingEnabled) return;
     const untriggeredAlertSymbols = paperAlerts.filter((alert) => alert.triggeredAt === null).map((alert) => alert.symbol);
     const quoteSymbols = [...new Set([...openPositions.map((position) => position.symbol), ...untriggeredAlertSymbols, ...watchlist])].slice(0, 50);
     if (!quoteSymbols.length) {
@@ -734,9 +761,13 @@ export default function TradingDesk() {
       current = false;
       window.clearInterval(timer);
     };
-  }, [watchlist, watchlistReady, openPositions, paperAlerts]);
+    // Suspending leaves the last quotes in state rather than clearing them:
+    // the watchlist should keep showing the prices it had — now visibly aged by
+    // the staleness badge — instead of going blank while the tab is hidden.
+  }, [watchlist, watchlistReady, openPositions, paperAlerts, pollingEnabled, resumeToken]);
   useEffect(() => {
     if (view !== "scanner") return;
+    if (!pollingEnabled) return;
     let current = true;
     let inFlight = false;
     const refreshScanner = async () => {
@@ -765,12 +796,41 @@ export default function TradingDesk() {
       current = false;
       window.clearInterval(timer);
     };
-  }, [view, scannerRefresh]);
+  }, [view, scannerRefresh, pollingEnabled, resumeToken]);
   useEffect(() => {
+    /*
+      The one staleness hole that was genuinely open.
+
+      Bracket fills two effects below are gated on a 120s maximum quote age and
+      always have been; alerts were not gated at all. The quotes effect keeps
+      the last successfully fetched price when a refresh fails, so an alert
+      would compare its trigger against a price of unbounded age — a quote from
+      an hour ago, or from before the laptop slept — and then stamp
+      `triggeredAt` permanently. There is no undo: the alert is consumed and
+      will never fire again, on a price that may have been dead for an hour.
+
+      Now the same MAX_QUOTE_AGE_MS rule applies, so an alert waits for a fresh
+      quote instead. A skipped evaluation costs nothing — the next poll retries
+      it — whereas a false trigger is unrecoverable.
+
+      The concrete failure this closes: polling stalls for an hour, the quotes
+      effect keeps the hour-old price, the user adds an alert, and adding it
+      re-runs this effect — firing the new alert instantly against a dead
+      price. The wall clock is deliberately not a dependency: every transition
+      that matters arrives via `quotes` or `paperAlerts`, and a fresh fetch
+      always carries a fresh `asOf`, so rescanning each second would only add
+      work without changing any outcome.
+    */
     const hits = paperAlerts.filter((alert) => {
       if (alert.triggeredAt !== null) return false;
       const quote = quotes.find((entry) => entry.symbol === alert.symbol);
-      return quote && (alert.direction === "above" ? quote.price >= alert.price : quote.price <= alert.price);
+      if (!quote) return false;
+      return isAlertTriggered({
+        direction: alert.direction,
+        triggerPrice: alert.price,
+        quotePrice: quote.price,
+        quoteAsOf: quote.asOf,
+      });
     });
     if (!hits.length) return;
     const hitIds = new Set(hits.map((alert) => alert.id));
@@ -789,8 +849,9 @@ export default function TradingDesk() {
       if (!bracket) return;
       const quote = quotes.find((entry) => entry.symbol === pos.symbol);
       if (!quote || !(quote.price > 0)) return;
-      const quoteAge = quote.asOf ? Date.now() - quote.asOf : Infinity;
-      if (quoteAge > 120_000) return;
+      // Same freshness rule as alerts and paper orders, now shared rather than
+      // a second copy of the literal. A stale quote pauses bracket evaluation.
+      if (!isQuoteActionable(quote.asOf)) return;
 
       if (bracket.takeProfitPrice && quote.price >= bracket.takeProfitPrice) {
         void closePaperPosition(pos.symbol, `Take-Profit hit at ${formatMoney(quote.price)} (+${bracket.takeProfitPct ?? "target"}%)`, "take_profit");
@@ -1241,7 +1302,7 @@ export default function TradingDesk() {
   function placePaperOrder(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!market || closingAssets.current.size || !Number.isFinite(Number(orderAmount)) || Number(orderAmount) <= 0) return;
-    if (market.symbol !== symbol || Date.now() - market.asOf > 120_000) {
+    if (market.symbol !== symbol || !isQuoteActionable(market.asOf)) {
       setPaperMessage("Refresh the market quote before recording this order (maximum age: two minutes).");
       return;
     }
@@ -1461,6 +1522,49 @@ export default function TradingDesk() {
     onTick: handleWsTick,
   });
 
+  /*
+    Fold the raw signals into one honest status.
+
+    The badge used to be `wsStatus === "connected" ? "WS Live" : "REST Polling"`
+    — two outcomes for four real situations, so "Bitget's WebSocket is down",
+    "you have no internet", and "REST polling is working fine" all rendered the
+    same amber pill. Now the resolver distinguishes live / polling / stalled /
+    offline, and only `offline` raises a banner.
+
+    `market.asOf` is the freshness input, not `effectiveMarket.asOf`. That
+    matters: on the replay path `effectiveMarket.asOf` is a *historical candle
+    close*, which is hours or days old by design and would pin the badge to
+    "Data Stalled" for every replay. Raw `market` holds Bitget's live ticker
+    timestamp and is advanced by each WS tick, so it reflects the real feed.
+
+    Paused while hidden, so a backgrounded tab does not report our own power
+    saving as an outage.
+  */
+  const connection = useConnectionStatus({
+    wsConnected: wsStatus === "connected",
+    quoteAgeMs: market ? quoteAgeMs(market.asOf, clockNow) : Infinity,
+    paused: !pollingEnabled,
+    maxAgeMs: MAX_QUOTE_AGE_MS,
+  });
+  const feed = connection.presentation;
+
+  /*
+    Which watchlist quotes have gone stale, computed once per tick instead of
+    once per rendered position row. Drives the "Quotes stale (Paused)" badge in
+    the positions table — the user-visible half of the bracket gate. It calls
+    the same predicate with the same threshold, so the badge cannot claim
+    paused while fills keep happening; the only difference is the timestamp
+    source (the 1s render clock here, Date.now() in the effect), which can
+    diverge by under a second at the exact boundary.
+  */
+  const staleQuoteSymbols = useMemo(() => {
+    const set = new Set<string>();
+    for (const quote of quotes) {
+      if (!isQuoteActionable(quote.asOf, clockNow, MAX_QUOTE_AGE_MS)) set.add(quote.symbol);
+    }
+    return set;
+  }, [quotes, clockNow]);
+
   const activePaperPlaybook = playbooks.find((playbook) => playbook.id === activePaperPlaybookId) ?? null;
 
   // Automated Paper Trading Rule Runner Engine
@@ -1569,11 +1673,32 @@ export default function TradingDesk() {
 
   useEffect(() => {
     if (!ruleRunnerActive) return;
+    /*
+      The fifth network loop, and the one with the highest per-tick cost: each
+      evaluation fetches a full candle series and can open or close a paper
+      position.
+
+      Gating it on visibility is a deliberate change to what the feature
+      promises, so it is worth stating plainly. Background tabs already have
+      their timers throttled by the browser — Chrome clamps them to roughly one
+      wake per minute after five minutes hidden, and suspends them outright
+      under memory pressure. So a hidden auto-runner was never reliably running
+      at 45s anyway; it was running at an unpredictable cadence nobody could
+      observe, while still spending rate limit. Explicit suspension is the
+      honest version of behaviour that was already degraded, and the status pill
+      below now says so instead of reading "Active".
+
+      Resuming re-runs the effect, which evaluates on the next tick rather than
+      immediately — intentional here, unlike the data loops: the runner's own
+      fetch supplies fresh candles, so there is nothing stale to catch up on,
+      and firing instantly on every alt-tab would evaluate on each return.
+    */
+    if (!pollingEnabled) return;
     const intervalId = window.setInterval(() => {
       void runRuleEvaluation();
     }, 45_000);
     return () => window.clearInterval(intervalId);
-  }, [ruleRunnerActive, runRuleEvaluation]);
+  }, [ruleRunnerActive, runRuleEvaluation, pollingEnabled]);
 
   // Snapshot Card Exporters
   const openResearchCardModal = () => {
@@ -2488,6 +2613,37 @@ export default function TradingDesk() {
 
         <div className="page-content">
           {/*
+            Page-level connectivity banner, above every tab and outside the
+            ErrorBoundary so a crashing view cannot take the warning down with
+            it.
+
+            Only `offline` raises it. A stalled feed is real but is already
+            legible in the badge, and a tab left open overnight would otherwise
+            greet the user with an alarm for something that fixes itself on the
+            next poll. `live` and `polling` are both healthy states and stay
+            silent — REST polling is a designed fallback, not a failure.
+
+            role="alert" announces it to screen readers the moment it appears,
+            which is the point: the desk otherwise keeps rendering plausible
+            prices with no indication that they are frozen.
+          */}
+          {feed.banner ? (
+            <div className="error-banner feed-offline-banner" role="alert">
+              <div>
+                <strong>{feed.bannerTitle}</strong>
+                <span>{feed.bannerDetail}</span>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setRefreshCount((count) => count + 1)}
+              >
+                Retry now
+              </button>
+            </div>
+          ) : null}
+
+          {/*
             One boundary around the whole view-switch region rather than one per
             tab: the views are mutually exclusive, so only one branch ever
             renders at a time and a single boundary isolates a crash exactly as
@@ -2562,11 +2718,12 @@ export default function TradingDesk() {
                           {market ? "Market data available" : marketLoading ? "Loading market data" : "Market data unavailable"}
                         </span>
                         <span
-                          className={`ws-status-badge ${wsStatus === "connected" ? "ws-connected" : "ws-fallback"}`}
-                          title={wsStatus === "connected" ? "Real-time streaming via wss://ws.bitget.com/v2/ws/public" : "Fallback REST polling"}
+                          className={`ws-status-badge ${feed.modifier}`}
+                          title={`${feed.title}${market ? ` · Quote ${describeQuoteAge(market.asOf, clockNow)}` : ""}`}
+                          role={feed.role}
                         >
-                          <span className={wsStatus === "connected" ? "pulse-dot-green" : "pulse-dot-gray"} />
-                          {wsStatus === "connected" ? "WS Live" : "REST Polling"}
+                          <span className={feed.dot} />
+                          {feed.label}
                         </span>
                       </div>
                       <div className="quote-line">
@@ -2585,7 +2742,10 @@ export default function TradingDesk() {
                     <div className="focus-source">
                       <span className="source-label">Source</span>
                       <strong>Bitget public API {wsStatus === "connected" ? "+ WebSocket Stream" : ""}</strong>
-                      <span>{market ? `Updated ${formatDate(market.asOf)}` : marketLoading ? "Fetching latest data" : "Waiting for connection"}</span>
+                      <span>
+                        {market ? `Updated ${formatDate(market.asOf)}` : marketLoading ? "Fetching latest data" : "Waiting for connection"}
+                        {!documentVisible && market ? " · paused while this tab is in the background" : ""}
+                      </span>
                       <div className="focus-source-actions">
                         <button className={`watch-toggle ${isWatchlisted ? "is-saved" : ""}`} onClick={() => isWatchlisted ? removeFromWatchlist(symbol) : addToWatchlist(symbol)} aria-pressed={isWatchlisted}>
                           {isWatchlisted ? <><Icon name="check" size={13} /> In watchlist</> : <><Icon name="plus" size={13} /> Add to watchlist</>}
@@ -5360,9 +5520,24 @@ export default function TradingDesk() {
                 <div className="rule-runner-header">
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                      <span className={`rule-runner-status-pill ${ruleRunnerActive ? "status-active" : "status-paused"}`}>
-                        <span className={ruleRunnerActive ? "pulse-dot-green" : "pulse-dot-gray"} />
-                        {ruleRunnerActive ? "Auto-Runner Active" : "Auto-Runner Paused"}
+                      {/*
+                        Three states, not two. "Active" while hidden would have
+                        been the same false claim as the orderbook's
+                        "Live stream active" dot: the runner is switched on but
+                        is not evaluating anything.
+                      */}
+                      <span
+                        className={`rule-runner-status-pill ${ruleRunnerActive ? (documentVisible ? "status-active" : "status-suspended") : "status-paused"}`}
+                        title={
+                          ruleRunnerActive
+                            ? documentVisible
+                              ? "Evaluating playbook rules every 45 seconds"
+                              : "Switched on, but suspended while this tab is in the background. Evaluations resume the moment you return."
+                            : "Auto-runner is off"
+                        }
+                      >
+                        <span className={ruleRunnerActive ? (documentVisible ? "pulse-dot-green" : "pulse-dot-amber") : "pulse-dot-gray"} />
+                        {ruleRunnerActive ? (documentVisible ? "Auto-Runner Active" : "Auto-Runner Suspended (tab hidden)") : "Auto-Runner Paused"}
                       </span>
                       <span className="strategy-tag">
                         <Icon name="playbook" size={12} /> Paper Automation
@@ -5475,9 +5650,12 @@ export default function TradingDesk() {
                     <td>
                       {bracket ? (
                         <div className="bracket-tag">
-                          {quote && (!quote.asOf || clockNow - quote.asOf > 120_000) ? (
-                            <span className="bracket-stale-badge" title="Bitget quote is older than 2 minutes. Bracket evaluation is paused until fresh quotes arrive.">
-                              ● Quotes stale &gt;2m (Paused)
+                          {staleQuoteSymbols.has(position.symbol) ? (
+                            <span
+                              className="bracket-stale-badge"
+                              title={`Bitget quote is ${describeQuoteAge(quote?.asOf, clockNow)} (maximum ${MAX_QUOTE_AGE_MS / 60000} minutes). Bracket evaluation is paused until fresh quotes arrive.`}
+                            >
+                              ● Quotes stale &gt;{MAX_QUOTE_AGE_MS / 60000}m (Paused)
                             </span>
                           ) : null}
                           <div className="bracket-tag-pills">
