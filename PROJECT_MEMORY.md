@@ -2,8 +2,8 @@
 
 > **Additional handoff (September 25):** Read [CODEX_HANDOFF_2026-09-25.md](CODEX_HANDOFF_2026-09-25.md) for the interrupted Codex reliability/backup/workflow batch, remaining issues and its limited verification. The historical test status below does not establish that this newer batch or concurrent edits are verified.
 
-**Last Updated:** September 28, 2026 (AI rate limits + social metadata shipped to production)  
-**Status:** LIVE at https://goriee-ai-desk.vercel.app (public, AI verified end-to-end). `npm test` green: **104 tests, 103 pass, 0 fail, 1 skipped** (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`, later `4fcb674`, `d7c17ee`). Refinement backlog in [TODO.md](TODO.md).  
+**Last Updated:** September 29, 2026 (Vercel Web Analytics added ahead of the demo video)  
+**Status:** LIVE at https://goriee-ai-desk.vercel.app (public, AI verified end-to-end). `npm test` green: **104 tests, 103 pass, 0 fail, 1 skipped** (live-AI research test, opt-in via `GORIEE_RUN_LIVE_AI_TESTS=1`). 0 TypeScript errors. E2E suites unchanged (12 general/copilot, 9 trade replay). Project is now under git version control (`main`, baseline commit `8b7d7b3`, later `4fcb674`, `d7c17ee`; current HEAD `7b121ed`). Refinement backlog in [TODO.md](TODO.md).  
 **Stack:** Next.js 16.3.6 (App Router, Turbopack), React 19.3.0, TypeScript 7, Vanilla CSS design system, Bitget Public Spot API.
 
 ---
@@ -692,5 +692,17 @@ TODO items **8** (rate limits, 🔴) and the metadata half of **13** (OG/twitter
 - **Prod:** `vercel deploy --prod --yes` → **`dpl_C9ykcjZCGYhQkzxQAxioNVyTzpXA`** (deployment URL `goriee-ai-desk-bg40w9uyp-…`), Ready and aliased. All `og:*`/`twitter:*`/`theme-color` tags present with `og:image` = `https://goriee-ai-desk.vercel.app/opengraph-image?<hash>`; PNG 200. Same fast drill in prod: req 1–6 = 400 (post-guard), req 7–8 = `429` with `Retry-After` 59/58 and a stable `retryAt`.
 - **Drill gotcha:** slow full-backtest requests (~15s each) record their hit at request *start*, so sequential slow requests land in different fixed-minute windows and never trip the minute budget — use cheap post-guard 400 payloads for 429 drills.
 - **Ops gotchas:** only ONE `next dev` per directory (a second instance exits pointing at the first's PID); PowerShell occasionally drops a leading `$var = …` assignment when a line starts with a stray control char (inline literals instead); `& "path\vercel.cmd"` was rejected once by the parser — plain `vercel.cmd` from PATH works.
+
+## 📈 28. Vercel Web Analytics (September 29, 2026)
+
+Visitor/pageview counting for the production deployment, added ahead of the demo video. **Commit:** `7b121ed` (3 files, +49/−1). Deployment **`dpl_D5SPuJ472EtPzp3vs1yfr7wD1d2V`** (`goriee-ai-desk-dqywccabu-goriees-projects.vercel.app`, Ready, aliased to prod).
+
+- `@vercel/analytics@^2.0.1` was already in `package.json`/`node_modules` but **not wired** — a `src/**` grep for "Analytics" returned only the unrelated Portfolio Analytics feature. The actual work was the layout edit, not an install.
+- `src/app/layout.tsx`: `import { Analytics } from "@vercel/analytics/next"` + `<Analytics />` rendered last inside `<body>`. Import path verified against the package's own `exports` map (`"./next"` → `dist/next/index.mjs`) and `dist/next/index.d.ts` (`declare function Analytics(props: Props): null`).
+- **No matching Next 16 doc exists** — grepping `node_modules/next/dist/docs/**` for `Analytics` / `third-party script` / `instrumentation` returns nothing, so the package's type defs are the source of truth here.
+- **The component renders `null` server-side.** It injects a client-side runtime that exposes a global `window.va` **function** dispatcher handling `"beforeSend" | "event" | "pageview"`, and pageviews go out via `sendBeacon`. Consequences: (1) the analytics script never appears in `curl`-fetched HTML or in a `script[src]` enumeration — that is expected, not a failure; (2) headless Chromium drops the beacon silently, so it won't show up in a Playwright `request` capture either.
+- **Verified live** by loading prod in a browser and asserting `typeof window.va === "function"` plus reading back its dispatcher source (`"beforeSend"…"event"…"pageview"`). That proves the runtime is active; real browsers will report.
+- **Data only appears once the Analytics feature is enabled** for the project in the Vercel dashboard (Project → Analytics → Enable); allow ~30s after real traffic, with content blockers off.
+- `npm run typecheck` exit 0; `npm run build` exit 0 with 12 static pages (`/opengraph-image` still prerendered) — the analytics component added no route and did not change the build shape.
 
 
