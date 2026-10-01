@@ -66,7 +66,7 @@ export default function TradingDesk() {
   */
   const [marketLoading, setMarketLoading] = useState(true);
   /*
-    The `symbol:interval` that `market` currently holds.
+    The `symbol:interval:tapeLimit` key of the dataset `market` currently holds.
 
     Needed to tell a *new dataset* from a *background refresh* of the dataset
     already on screen. A ref rather than state because it only ever changes
