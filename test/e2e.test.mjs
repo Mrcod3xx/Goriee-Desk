@@ -172,6 +172,18 @@ test("E2E Browser: Comprehensive UI and Workflow Validation", async (t) => {
       await navButtons[3].click();
       await new Promise((r) => setTimeout(r, 500));
 
+      // Pin the market for this subtest instead of inheriting whatever the Scanner
+      // subtest left selected. Its "SOL" search matches tokenized assets first
+      // (e.g. RSOLSUSDT), and those thin listings produce a single completed trade
+      // over 30d at 1H. MonteCarloPanel needs >=2 completed trades, so it renders
+      // its empty state under the same `.monte-carlo-panel` class and the verdict
+      // banner never appears. BTCUSDT is in DEFAULT_WATCHLIST, so it is always an
+      // option in the select and yields ~7 trades on the default EMA 20/50 prompt.
+      await page.select("#backtest-symbol", "BTCUSDT");
+      await new Promise((r) => setTimeout(r, 300));
+      const pinnedSymbol = await page.$eval("#backtest-symbol", (el) => el.value);
+      assert.equal(pinnedSymbol, "BTCUSDT", "Backtest subtest must control its own market");
+
       // Submit backtest form
       const submitBtn = await page.waitForSelector(".strategy-builder button[type='submit']", { timeout: 5000 });
       assert.ok(submitBtn !== null, "Submit backtest button should exist");

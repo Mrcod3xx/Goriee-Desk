@@ -7,14 +7,38 @@
 > **Update (later Sept 28): item 6 is DONE** — crash-safety shipped first because it was the only gap that could blank the entire app mid-demo (see item 6 for what shipped and for corrections to the original findings).
 >
 > **Update (Sept 29): items 8, 9 and 10 are DONE** — AI rate limiting, connection awareness / staleness, and live-data resilience (typed errors, real backoff, `Retry-After`, consolidated request path). Remaining 🔴 quick win: **7** (shadowed `setInterval` — latent, no current misbehavior).
+>
+> **Update (Oct 1): item 1 is now FULLY GREEN.** The first run was 4 of 5 green with `npm run test:e2e` failing 2 of 12 on the Monte Carlo verdict banner. That turned out to be a **test hermeticity bug, not a product regression** — the fix is confined to `test/e2e.test.mjs`, with no source code changed. All five checks now pass, E2E included (12/12). See item 1 for the confirmed root cause.
 
-## 1. Run verification baseline suite ⬜
+## 1. Run verification baseline suite ✅ ALL GREEN (after fixing a test hermeticity bug)
 Establish a true green baseline BEFORE any refactoring (the Codex handoff batch was never fully validated after concurrent edits).
-- [ ] `npm test` (unit, Monte Carlo, API — expect 104 tests, 103 pass, 1 skipped)
-- [ ] `npm run test:e2e` (general + Strategy Copilot, 12 tests)
-- [ ] `node --test test/trade-replay-e2e.test.mjs` (9 tests)
-- [ ] `node test/check-console-errors.mjs` (0 errors across all 9 tabs)
-- [ ] `npm run typecheck` (0 errors — already confirmed clean Sept 28)
+
+**Baseline run October 1, 2026** on `main` @ `17aac36` (Node v24.20.0, dev server on :3000, Chrome headless). First run was 4 of 5 green; the E2E failure was then diagnosed and fixed. **Re-run result: all five checks green.**
+
+- [x] `npm test` (unit, Monte Carlo, API) — **221 tests, 220 pass, 0 fail, 1 skipped**, 23 suites, 36.1s. The 1 skip is the documented opt-in live-AI test (`GORIEE_RUN_LIVE_AI_TESTS`). Note: the "expect 104 tests, 103 pass" figure above is stale — the suite has grown since Sept 28; 221 is the current count, not a failure.
+- [x] `npm run test:e2e` (general + Strategy Copilot, 12 tests) — **12 pass, 0 fail** after the fix below (was 10 pass / 2 fail, reproduced twice on cold *and* warm server, so it was deterministic rather than a startup flake).
+- [x] `node --test test/trade-replay-e2e.test.mjs` — **9 tests, 9 pass, 0 fail.**
+- [x] `node test/check-console-errors.mjs` — **0 console errors across all 9 tabs.**
+- [x] `npm run typecheck` — **0 errors.**
+
+### The failure that was fixed
+```
+test\e2e.test.mjs:169  "Backtests: Run Simulation, Dual Curve & Scorecard Verification"
+  ✖ AssertionError: Monte Carlo verdict banner should be visible   (e2e.test.mjs:218)
+```
+The parent assertion (`✖ E2E Browser: Comprehensive UI and Workflow Validation`) failed only because this subtest did; the other six subtests passed.
+
+**Confirmed root cause (proved with request/response interception plus a DOM dump, not inferred):** the *preceding* Scanner subtest types `SOL` into the search field and clicks a row's **Backtest** quick action, which calls `selectMarket(item.symbol)` (`trading-desk.tsx:2973`). Its first matching row is **`RSOLSUSDT`** — a tokenized stock asset, not `SOLUSDT`. The Backtests subtest then submits without resetting the market, so it backtests `RSOLSUSDT` at 1H / 30d. That thin listing yields **exactly 1 completed trade** (`tradeCount=1, closedTrades=1`), and `MonteCarloPanel` requires `trades.length >= 2` (`monte-carlo-panel.tsx:22`) to build 1,000 bootstrap paths.
+
+The reason it looked like a product bug: the empty state shares the `monte-carlo-panel` class, so the test's `waitForSelector(".monte-carlo-panel")` passed, and `robustness` was still present so every scorecard assertion passed too — the only visible symptom was the missing `.mc-verdict-banner`. Verified in the DOM at the failure point: `panels=1 banners=0 fans=0 quietEmpty=true`.
+
+**The app was behaving correctly.** One trade genuinely cannot support a Monte Carlo cone, and the panel says so. For contrast, the same prompt at 1H / 30d returns 7 trades on `BTCUSDT`, 8 on `SOLUSDT` and 10 on `ETHUSDT` — so the original "make the backtest yield ≥2 trades" framing was aimed at the wrong layer. The defect was test hermeticity: **subtest 5 depended on state subtest 4 left behind.**
+
+**Fix applied (`test/e2e.test.mjs` only, zero source changes):** the Backtests subtest now pins its own market with `page.select("#backtest-symbol", "BTCUSDT")` and asserts the pin took effect before submitting. `BTCUSDT` is in `DEFAULT_WATCHLIST` (`desk-shared.ts:3`) and `selectableSymbols` always includes the current symbol plus the watchlist, so the option exists regardless of what the Scanner subtest did. The comment in the test explains the `RSOLSUSDT` leak so the pin is not mistaken for noise and removed later.
+
+Rejected alternative: asserting the empty state explicitly would have made the test pass while letting the Monte Carlo cone silently stop rendering in demos — it would have encoded the symptom rather than fixed the cause.
+
+**Implication for item 2:** the plan's precondition ("verification baseline first so refactors can be proven safe") is now **fully met**. E2E is green and, importantly, is now hermetic — the Backtests subtest controls its own inputs, so a future `trading-desk.tsx` extraction that breaks backtesting will fail for the right reason instead of being masked or confounded by symbol leakage from an earlier subtest.
 
 ## 2. Split the `trading-desk.tsx` monolith (highest impact) 🔄 IN PROGRESS — phase 1 committed
 **Status correction (Sept 28, 2026):** the split has been *started* and phase 1 is now committed (`ef9e6da`). `trading-desk.tsx` is down from 8,855 → **6,649 lines / 373 KB**, with six extracted modules now tracked in git: `desk-types.ts` (214), `desk-shared.ts` (132), `desk-icon.tsx` (50), `desk-charts.tsx` (141), `price-chart.tsx` (1,714), `research-panels.tsx` (401). Verified before commit: `tsc --noEmit` clean + 54 tests / 53 pass / 0 fail / 1 skipped. The remaining work below is phase 2 — the file still holds nearly all app state.
