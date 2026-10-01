@@ -128,6 +128,16 @@ Also corrected in the same pass: `marketLoading` means *"we have no dataset to s
 - `node --test test/trade-replay-e2e.test.mjs` — **9 pass, 0 fail** (previously flaky; now deterministic)
 - `node test/check-console-errors.mjs` — **0 console errors across all 9 tabs**
 
+### Deployed to production ✅ 2026-10-01 19:05 +0800
+Pushing to GitHub does **not** update the live app — see Housekeeping, deploys are manual. Deployed with `vercel deploy --prod --yes`: **`dpl_3mXki2z4JtsuooQAugVuLyvEjdDU`**, Ready in 20 s, aliased to https://goriee-ai-desk.vercel.app. The previous production deploy was **2 days old**, so none of today's work was live until now.
+
+**Both fixes verified against the live URL in a real browser, not just against a green build:**
+- **Clock-skew fix — the headline symptom is gone.** The status badge reads `WS Live` with the accessible status `"Real-time streaming via wss://ws.bitget.com/v2/ws/public · Quote 0s old"`. Before this deploy the same page read **"Data Stalled"** with age **"timestamp unknown"** for exactly as long as the socket was healthy. No `Data Stalled`, `REST Polling` or offline banner present.
+- **Tape-depth fix — Replay now gets its full history.** The replay tab reads **"BTCUSDT · 1H · Bar 276 of 1000"**. Before the fix Replay inherited the desk's 300-bar tape, so this could never have read *of 1000*.
+- `/api/market` returns 200 with live data in production; **0 console errors** on the desk and replay tabs.
+
+Deliberately **not** run: a local `next build` before deploying. The dev server holds `.next`, and building alongside it corrupts the cache — that is why the dev server needed `Remove-Item -Recurse -Force .next` earlier today. Vercel's build is the production-build check here, and it is safe: a failed build never aliases, so the live site is left untouched.
+
 ## 8. Rate-limit the AI endpoints 🔴 (new exposure since going public) ✅ DONE — committed 2026-09-28
 The NVIDIA key is now server-side on a public URL. `/api/research`, `/api/backtest` and `/api/copilot/chat` had **no server-side throttle** — the only cooldown was `goriee.ai-cooldown.v1` in localStorage, trivially bypassed. Shipped, typecheck-clean, `next build` green, 26 new unit tests, and the 429 contract proven live on dev **and** production at zero provider cost.
 - [x] Add a per-IP (or per-session) rate limit in front of the three LLM routes; return `429` with `Retry-After` so the existing client-side 429 handling (`ai-errors.ts:9,15`) picks it up
@@ -212,4 +222,6 @@ The in-progress monolith split and the timeout work were sitting uncommitted whi
 - [x] Backup branches pushed: `backup/2026-09-28` → `4fcb674` (pre-split) and `backup/2026-09-28-post-split` → `6f0010a` (current)
 - [x] **Redeployed so the timeout fix is actually live:** `dpl_87KVXV7cAj3dgvwqeyaAQpvLY5S5`, Ready 18:56 +0800, aliased to https://goriee-ai-desk.vercel.app. The earlier deploy `dpl_32CfrN8v3eEPV9jzzV9NPSafEphU` (16:53) shipped *before* `llm.ts`/the routes were edited (17:01), so it did **not** contain `maxDuration = 300` — earlier notes claiming it did were wrong and are corrected in PROJECT_MEMORY §22/§25.
 - [ ] Still open: the GitHub repo `Mrcod3xx/Goriee-Desk` is not reachable from the `goriee` Vercel account, so deploys stay manual (`vercel deploy --prod --yes`) — git now matches prod, but there is still no CI/auto-deploy
+  - **2026-10-01 — this gap bit us.** `dc12a5d`/`f3fdd72` were committed and pushed, and prod still served the 2-day-old build; the clock-skew bug stayed live for users the whole time. Deployed manually as `dpl_3mXki2z4JtsuooQAugVuLyvEjdDU` (see item 7 → *Deployed to production*). **Pushing to GitHub is not shipping.** Until the repo is linked, every fix needs an explicit `vercel deploy --prod --yes` plus a live-URL check.
+  - Note for whoever deploys next: `vercel` is installed **globally** (`vercel@60.1.3`, `C:\Users\Admin\AppData\Roaming\npm\vercel.cmd`), not in devDependencies, and `.vercel/project.json` is present (project `goriee-ai-desk`, team `goriees-projects`, authed as `goriee`). The CLI writes its progress to **stderr**, so a bare `vercel deploy --prod --yes` can look like it produced no output — run it through `cmd /c "vercel … > log 2>&1"` and then read the log, and confirm with `vercel inspect <url>` that the alias really moved.
 - [ ] Still open: the 300s ceiling is **not yet verified in production**. The post-deploy smoke test returned in 2.3s, which never approaches the limit. Confirming it needs a genuinely long reasoning call. Note all routes bundle into one lambda (fluid compute), so per-route `maxDuration` can't be read from the deployments API.
