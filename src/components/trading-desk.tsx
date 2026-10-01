@@ -47,10 +47,33 @@ export type { ReplayBracketConfig, ReplayTradeMarker, ReplayTargetTrade } from "
 export default function TradingDesk() {
   const [view, setView] = useState<View>("desk");
   const [symbol, setSymbol] = useState("BTCUSDT");
-  const [interval, setInterval] = useState("1H");
+  // Deliberately NOT named `interval` / `setInterval`: a setter called
+  // `setInterval` shadows `window.setInterval` for the whole component, and a
+  // bare `setInterval(fn, ms)` then silently calls the React state setter
+  // instead of scheduling a timer. React would invoke `fn` as an updater with
+  // the previous state, so the timer never runs and state becomes `undefined`
+  // — no error, no warning, just a chart that stops refreshing. Every timer in
+  // this file is written `window.setInterval(...)` for the same reason.
+  // Enforced by test/unit.test.mjs → "no timer global is shadowed".
+  const [chartInterval, setChartInterval] = useState("1H");
   const [market, setMarket] = useState<MarketData | null>(null);
   const [marketError, setMarketError] = useState("");
+  /*
+    `marketLoading` means "we have no dataset to show yet", NOT "a fetch is in
+    flight". The difference is user-visible: it gates the Copilot submit buttons
+    below, so treating a silent background refresh as loading used to disable
+    them for the duration of every 60 s poll.
+  */
   const [marketLoading, setMarketLoading] = useState(true);
+  /*
+    The `symbol:interval` that `market` currently holds.
+
+    Needed to tell a *new dataset* from a *background refresh* of the dataset
+    already on screen. A ref rather than state because it only ever changes
+    alongside `market`, and the polling closure must read its live value without
+    being re-subscribed to it.
+  */
+  const loadedMarketRef = useRef<string | null>(null);
   const [toastMessage, setToastMessage] = useState("");
 
   // Trade Replay Simulator State
@@ -75,7 +98,7 @@ export default function TradingDesk() {
       return {
         symbol: replayTargetTrade.symbol,
         category: "SPOT" as const,
-        interval: replayTargetTrade.interval ?? interval,
+        interval: replayTargetTrade.interval ?? chartInterval,
         price: last.close,
         change24h: 0,
         high24h: c.reduce((max, bar) => (bar.high > max ? bar.high : max), -Infinity),
@@ -87,7 +110,7 @@ export default function TradingDesk() {
       };
     }
     return market;
-  }, [view, replayTargetTrade, market, interval]);
+  }, [view, replayTargetTrade, market, chartInterval]);
 
   // Clamped market data for zero-hindsight simulation
   const activeMarket = useMemo(() => {
@@ -428,13 +451,13 @@ export default function TradingDesk() {
   useEffect(() => {
     setBacktest(null);
     setBacktestError("");
-  }, [symbol, interval, strategyPrompt, backtestDays, feeBps, slippageBps]);
+  }, [symbol, chartInterval, strategyPrompt, backtestDays, feeBps, slippageBps]);
 
   useEffect(() => {
-    if (!supportsBacktestWindow(interval, backtestDays)) {
-      setBacktestDays(interval === "1D" ? 90 : 30);
+    if (!supportsBacktestWindow(chartInterval, backtestDays)) {
+      setBacktestDays(chartInterval === "1D" ? 90 : 30);
     }
-  }, [interval, backtestDays]);
+  }, [chartInterval, backtestDays]);
 
   useEffect(() => {
     if ((!pickerOpen && !marketSearchOpen) || tokensLoaded) return;
@@ -465,19 +488,49 @@ export default function TradingDesk() {
     if (!pollingEnabled) return;
     let current = true;
     const load = async () => {
-      setMarketLoading(true);
+      /*
+        Tape depth is part of the dataset's identity, not just a fetch detail.
+        Replay needs ~1000 bars to be worth scrubbing; the desk only draws 300.
+        Keying on it is what makes entering the Replay tab refetch — `limit` was
+        already computed from the view here, but the effect's dependency array
+        omitted it, so the tab inherited the desk's 300-bar tape and kept it
+        until the next 60 s poll happened to land. The replay studio therefore
+        opened with a third of the intended history.
+      */
+      const tapeLimit = isReplayActive ? 1000 : 300;
+      const requestKey = `${symbol}:${chartInterval}:${tapeLimit}`;
+      /*
+        Only a *different* dataset clears the screen. Switching symbol, interval
+        or tape depth has to drop the old candles, or the chart would keep
+        drawing BTC bars under an ETH label until the response landed.
+
+        A background refresh of the dataset already on screen must not. This
+        effect re-runs `load()` every 60 s, and nulling `market` there flipped
+        the `{effectiveMarket ? <PriceChart/> : <placeholder>}` gate, unmounting
+        and remounting the whole chart on every poll. That silently threw away
+        the user's zoom, pan and hover state once a minute — and it made any
+        click on a chart control land on a node that no longer existed, which is
+        how it surfaced as a flaky "node detached" failure in the replay E2E.
+      */
+      const isNewDataset = loadedMarketRef.current !== requestKey;
+      if (isNewDataset) {
+        setMarketLoading(true);
+        setMarket(null);
+      }
       setMarketError("");
-      setMarket(null);
       try {
         const queryParams = new URLSearchParams({
           symbol,
-          interval,
-          limit: view === "replay" ? "1000" : "300",
+          interval: chartInterval,
+          limit: String(tapeLimit),
         });
         const response = await fetch(`/api/market?${queryParams.toString()}`, { cache: "no-store" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Market data could not be loaded.");
-        if (current) setMarket(payload.market as MarketData);
+        if (current) {
+          setMarket(payload.market as MarketData);
+          loadedMarketRef.current = requestKey;
+        }
       } catch (error) {
         if (current) setMarketError(error instanceof Error ? error.message : "Market data could not be loaded.");
       } finally {
@@ -490,7 +543,12 @@ export default function TradingDesk() {
       current = false;
       window.clearInterval(timer);
     };
-  }, [symbol, interval, refreshCount, pollingEnabled, resumeToken]);
+    /*
+      `isReplayActive` is here rather than `view`: only the replay transition
+      changes tape depth, so keying on the narrower value refetches when it
+      matters without a redundant fetch on every other tab switch.
+    */
+  }, [symbol, chartInterval, refreshCount, pollingEnabled, resumeToken, isReplayActive]);
 
   const cashBalance = useMemo(
     () => paperCash(paperTrades, paperFeeBps, STARTING_CASH),
@@ -1056,7 +1114,7 @@ export default function TradingDesk() {
       id: crypto.randomUUID(),
       name: name.slice(0, 48),
       symbol,
-      interval,
+      interval: chartInterval,
       prompt: strategyPrompt.trim(),
       lookbackDays: backtestDays,
       feeBps,
@@ -1083,7 +1141,7 @@ export default function TradingDesk() {
 
   function loadPlaybook(playbook: StrategyPlaybook) {
     setSymbol(playbook.symbol);
-    setInterval(playbook.interval);
+    setChartInterval(playbook.interval);
     setStrategyPrompt(playbook.prompt);
     setBacktestDays(playbook.lookbackDays);
     setFeeBps(playbook.feeBps);
@@ -1094,7 +1152,7 @@ export default function TradingDesk() {
 
   function usePlaybookInPaper(playbook: StrategyPlaybook) {
     setSymbol(playbook.symbol);
-    setInterval(playbook.interval);
+    setChartInterval(playbook.interval);
     setActivePaperPlaybookId(playbook.id);
     safeWrite(storageKeys.activePlaybook, playbook.id);
     setPaperTab("account");
@@ -1134,12 +1192,12 @@ export default function TradingDesk() {
     researchAbortRef.current = controller;
 
     try {
-      const prompt = question.trim() || `Analyze ${symbol} on the ${interval} timeframe.`;
+      const prompt = question.trim() || `Analyze ${symbol} on the ${chartInterval} timeframe.`;
       const response = await fetch("/api/research", {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({ question: prompt, symbol, interval, includeWebResearch }),
+        body: JSON.stringify({ question: prompt, symbol, interval: chartInterval, includeWebResearch }),
       });
       const payload = await response.json().catch(() => { throw new Error("The server returned an unreadable response. Your prompt is saved; try again."); });
       if (!response.ok) {
@@ -1222,7 +1280,7 @@ export default function TradingDesk() {
         signal: controller.signal,
         body: JSON.stringify({
           symbol: overrides?.symbol ?? playbook?.symbol ?? symbol,
-          interval: overrides?.interval ?? playbook?.interval ?? interval,
+          interval: overrides?.interval ?? playbook?.interval ?? chartInterval,
           strategyPrompt: overrides?.prompt ?? playbook?.prompt ?? strategyPrompt,
           lookbackDays: overrides?.lookbackDays ?? playbook?.lookbackDays ?? backtestDays,
           feeBps: playbook?.feeBps ?? feeBps,
@@ -1235,7 +1293,7 @@ export default function TradingDesk() {
         throw new Error(payload.error ?? "Backtest could not be completed.");
       }
       const requestSymbol = overrides?.symbol ?? playbook?.symbol ?? symbol;
-      const requestInterval = overrides?.interval ?? playbook?.interval ?? interval;
+      const requestInterval = overrides?.interval ?? playbook?.interval ?? chartInterval;
       const seededMatchesRequest = seededResearchReport
         && seededResearchReport.symbol === requestSymbol
         && seededResearchReport.interval === requestInterval;
@@ -1261,7 +1319,7 @@ export default function TradingDesk() {
     const promptToUse = generateBacktestPromptFromResearch(targetReport);
 
     setSymbol(symbolToUse);
-    setInterval(intervalToUse);
+    setChartInterval(intervalToUse);
     setStrategyPrompt(promptToUse);
     setSeededResearchReport(targetReport);
     setToastMessage(`Custom backtest hypothesis loaded from ${targetReport.symbol} research brief.`);
@@ -1343,7 +1401,7 @@ export default function TradingDesk() {
       feeBps: paperFeeBps,
       ...(orderSide === "buy" && sourcePlaybook?.symbol === symbol && sourcePlaybook.researchRef
         ? { researchRef: sourcePlaybook.researchRef }
-        : orderSide === "buy" && report?.symbol === symbol && report.interval === interval
+        : orderSide === "buy" && report?.symbol === symbol && report.interval === chartInterval
         ? { researchRef: { id: report.id, question: report.question } }
         : {}),
       ...(orderSide === "buy" && sourcePlaybook?.symbol === symbol && sourcePlaybook.backtestRef
@@ -1955,7 +2013,7 @@ export default function TradingDesk() {
     const target: ReplayTargetTrade = {
       id: trade.id,
       symbol: trade.symbol,
-      interval: interval,
+      interval: chartInterval,
       openedAt: trade.openedAt,
       closedAt: trade.closedAt,
       entryPrice: trade.entryPrice,
@@ -1980,7 +2038,7 @@ export default function TradingDesk() {
     setIsReplayPlaying(false);
     setView("replay");
     setToastMessage(`Loaded paper trade review for ${trade.symbol}`);
-  }, [interval, symbol]);
+  }, [chartInterval, symbol]);
 
   const replayFromBacktestTrade = useCallback((trade: CompletedTrade, testSymbol: string, testInterval: string, strategyPromptText?: string, backtestCandles?: Candle[]) => {
     const target: ReplayTargetTrade = {
@@ -2013,13 +2071,13 @@ export default function TradingDesk() {
     if (symbol !== testSymbol) {
       setSymbol(testSymbol);
     }
-    if (interval !== testInterval) {
-      setInterval(testInterval);
+    if (chartInterval !== testInterval) {
+      setChartInterval(testInterval);
     }
     setIsReplayPlaying(false);
     setView("replay");
     setToastMessage(`Loaded backtest trade replay for ${testSymbol} ${testInterval}`);
-  }, [symbol, interval]);
+  }, [symbol, chartInterval]);
 
   const replayScorecard = useMemo(() => {
     const currentPrice = currentReplayCandle?.close ?? 0;
@@ -2318,7 +2376,7 @@ export default function TradingDesk() {
     }
     return {
       symbol: targetMarket.symbol,
-      interval,
+      interval: chartInterval,
       price: targetMarket.price,
       change24h: targetMarket.change24h,
       high24h: targetMarket.high24h,
@@ -2334,7 +2392,7 @@ export default function TradingDesk() {
       squeezeActive: squeeze?.isSqueezed,
       squeezeBias: squeeze?.bias,
     };
-  }, [activeMarket, interval, liveIndicators]);
+  }, [activeMarket, chartInterval, liveIndicators]);
 
   const copilotPaperSnapshot: PaperContextSnapshot = useMemo(() => {
     if (isReplayActive) {
@@ -2456,12 +2514,12 @@ export default function TradingDesk() {
 
   const handleCopilotRunBacktest = useCallback((action: any) => {
     const targetSymbol = action.symbol || symbol;
-    const targetInterval = action.interval || interval;
+    const targetInterval = action.interval || chartInterval;
     const targetPrompt = action.strategyPrompt || strategyPrompt;
     const targetDays = action.lookbackDays || backtestDays;
 
     if (targetSymbol !== symbol) setSymbol(targetSymbol);
-    if (targetInterval !== interval) setInterval(targetInterval);
+    if (targetInterval !== chartInterval) setChartInterval(targetInterval);
     setStrategyPrompt(targetPrompt);
     setBacktestDays(targetDays);
     setView("backtests");
@@ -2473,14 +2531,14 @@ export default function TradingDesk() {
       lookbackDays: targetDays,
     });
     setToastMessage(`Running backtest for ${targetSymbol} (${targetInterval})...`);
-  }, [symbol, interval, strategyPrompt, backtestDays]);
+  }, [symbol, chartInterval, strategyPrompt, backtestDays]);
 
   const handleCopilotSavePlaybook = useCallback((action: any) => {
     const newPlaybook: StrategyPlaybook = {
       id: crypto.randomUUID(),
       name: action.title || `Copilot Playbook (${action.symbol || symbol})`,
       symbol: action.symbol || symbol,
-      interval: action.interval || interval,
+      interval: action.interval || chartInterval,
       prompt: action.entryRules && action.exitRules
         ? `Entry: ${action.entryRules}. Exit: ${action.exitRules}`
         : action.entryRules || "Generated by AI Strategy Copilot",
@@ -2494,7 +2552,7 @@ export default function TradingDesk() {
     safeWriteJson(storageKeys.playbooks, next);
     setView("playbooks");
     setToastMessage(`Playbook "${newPlaybook.name}" saved successfully.`);
-  }, [symbol, interval, playbooks]);
+  }, [symbol, chartInterval, playbooks]);
 
   const handleCopilotSelectMarket = useCallback((targetSymbol: string) => {
     selectMarket(targetSymbol);
@@ -2507,7 +2565,7 @@ export default function TradingDesk() {
       id: crypto.randomUUID(),
       question: entry.title,
       symbol: entry.symbol || symbol,
-      interval,
+      interval: chartInterval,
       summary: entry.notes.slice(0, 400),
       regime: liveIndicators?.regime ?? "AI Strategy Copilot",
       price: market?.price ?? 0,
@@ -2531,7 +2589,7 @@ export default function TradingDesk() {
     });
     setView("journal");
     setToastMessage(`Strategy conversation exported to Trade Journal.`);
-  }, [symbol, interval, liveIndicators, market, aiModel]);
+  }, [symbol, chartInterval, liveIndicators, market, aiModel]);
 
   const navItems: Array<{ id: View; label: string; icon: string }> = [
     { id: "desk", label: "Market desk", icon: "grid" },
@@ -2692,7 +2750,7 @@ export default function TradingDesk() {
                       {!instrumentLoading && !instrumentError && filteredInstruments.length > 6 ? <button type="button" className="desk-search-browse" onClick={() => { setPickerOpen(true); setMarketSearchOpen(false); }}>Browse all matching markets <Icon name="arrow" size={14} /></button> : null}
                     </div> : null}
                   </div>
-                  <label className="interval-control"><span>Chart interval</span><select value={interval} onChange={(event) => setInterval(event.target.value)} aria-label="Chart interval">{["15m", "1H", "4H", "1D"].map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label className="interval-control"><span>Chart interval</span><select value={chartInterval} onChange={(event) => setChartInterval(event.target.value)} aria-label="Chart interval">{["15m", "1H", "4H", "1D"].map((value) => <option key={value}>{value}</option>)}</select></label>
                 </div>
               </div>
 
@@ -2771,7 +2829,7 @@ export default function TradingDesk() {
                         <div>
                           <h2 id="chart-title">Price history</h2>
                           <p>
-                            {symbol} · {interval} candles · latest 100 shown
+                            {symbol} · {chartInterval} candles · latest 100 shown
                           </p>
                         </div>
                         <div className="chart-heading-actions">
@@ -2782,7 +2840,7 @@ export default function TradingDesk() {
                       {market ? (
                         <PriceChart
                           candles={market.candles}
-                          label={`${symbol} ${interval} price history from Bitget`}
+                          label={`${symbol} ${chartInterval} price history from Bitget`}
                           indicators={liveIndicators}
                         />
                       ) : (
@@ -2834,8 +2892,8 @@ export default function TradingDesk() {
                           <div className="panel-heading"><div><h2 id="ask-title">Ask the desk</h2><p>Turn market data into a grounded brief, with optional live news.</p></div><span className="research-mark"><Icon name="research" size={16} /></span></div>
                           <form onSubmit={submitResearch} className="research-form">
                             <label htmlFor="research-question">What do you want to understand?</label>
-                            <textarea id="research-question" rows={4} maxLength={600} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={`Analyze ${symbol} on the ${interval} chart. Show both sides and what would change the read.`} />
-                            <div className="prompt-examples"><span>Try:</span><button type="button" onClick={() => setQuestion(`Analyze ${symbol} on the ${interval} chart. Show both sides and what would change the read.`)}>Read the current structure</button><button type="button" onClick={() => setQuestion(`Summarize momentum and what would invalidate the current read for ${symbol}.`)}>Check momentum</button></div>
+                            <textarea id="research-question" rows={4} maxLength={600} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={`Analyze ${symbol} on the ${chartInterval} chart. Show both sides and what would change the read.`} />
+                            <div className="prompt-examples"><span>Try:</span><button type="button" onClick={() => setQuestion(`Analyze ${symbol} on the ${chartInterval} chart. Show both sides and what would change the read.`)}>Read the current structure</button><button type="button" onClick={() => setQuestion(`Summarize momentum and what would invalidate the current read for ${symbol}.`)}>Check momentum</button></div>
                             <label className="research-web-option"><input type="checkbox" checked={includeWebResearch} onChange={(event) => setIncludeWebResearch(event.target.checked)} /><span><strong>Include live news search</strong><small>Optional. Real-time market news headlines &amp; citations are gathered across all AI routers.</small></span></label>
                             {researchError ? (
                               <div className="research-error-group">
@@ -2853,7 +2911,7 @@ export default function TradingDesk() {
                             {researchLoading ? (
                               <ResearchLoadingStatus
                                 symbol={symbol}
-                                interval={interval}
+                                interval={chartInterval}
                                 elapsed={researchElapsed}
                                 includeWebResearch={includeWebResearch}
                                 aiModel={aiModel}
@@ -2910,8 +2968,8 @@ export default function TradingDesk() {
 
                   <section className="below-grid">
                     <div className="panel market-reading">
-                      <div className="panel-heading"><div><h2>Market reading</h2><p>Computed from the latest {interval} candles.</p></div><button className="text-button" onClick={() => setView("research")}>Open research <Icon name="arrow" size={14} /></button></div>
-                      {market ? <div className="reading-row"><div className="reading-state"><span className={`regime-mark ${(liveIndicators?.regime ?? report?.indicators?.regime) === "Bullish structure" ? "regime-up" : (liveIndicators?.regime ?? report?.indicators?.regime) === "Bearish structure" ? "regime-down" : ""}`} /><div><strong>{liveIndicators?.regime ?? (report && report.symbol === symbol && report.interval === interval ? report.indicators.regime : "Ready for analysis")}</strong><span>{liveIndicators ? `Calculated from current ${interval} candles (RSI: ${liveIndicators.rsi14.toFixed(1)})` : "Run a research brief to calculate the trend structure"}</span></div></div><div className="reading-data"><span>Last price</span><strong>{formatMoney(market.price)}</strong></div><div className="reading-data"><span>24h move</span><strong className={market.change24h >= 0 ? "tone-up" : "tone-down"}>{market.change24h >= 0 ? "+" : ""}{market.change24h.toFixed(2)}%</strong></div></div> : <div className="quiet-empty">Market reading will appear once data is available.</div>}
+                      <div className="panel-heading"><div><h2>Market reading</h2><p>Computed from the latest {chartInterval} candles.</p></div><button className="text-button" onClick={() => setView("research")}>Open research <Icon name="arrow" size={14} /></button></div>
+                      {market ? <div className="reading-row"><div className="reading-state"><span className={`regime-mark ${(liveIndicators?.regime ?? report?.indicators?.regime) === "Bullish structure" ? "regime-up" : (liveIndicators?.regime ?? report?.indicators?.regime) === "Bearish structure" ? "regime-down" : ""}`} /><div><strong>{liveIndicators?.regime ?? (report && report.symbol === symbol && report.interval === chartInterval ? report.indicators.regime : "Ready for analysis")}</strong><span>{liveIndicators ? `Calculated from current ${chartInterval} candles (RSI: ${liveIndicators.rsi14.toFixed(1)})` : "Run a research brief to calculate the trend structure"}</span></div></div><div className="reading-data"><span>Last price</span><strong>{formatMoney(market.price)}</strong></div><div className="reading-data"><span>24h move</span><strong className={market.change24h >= 0 ? "tone-up" : "tone-down"}>{market.change24h >= 0 ? "+" : ""}{market.change24h.toFixed(2)}%</strong></div></div> : <div className="quiet-empty">Market reading will appear once data is available.</div>}
                     </div>
                     <div className="panel recent-panel">
                       <div className="panel-heading"><div><h2>Recent research</h2><p>Your saved notes on this device.</p></div><button className="text-button" onClick={() => setView("journal")}>View journal <Icon name="arrow" size={14} /></button></div>
@@ -2998,7 +3056,7 @@ export default function TradingDesk() {
                         <select value={symbol} onChange={(event) => setSymbol(event.target.value)} aria-label="Choose spot symbol">
                           {selectableSymbols.map((asset) => <option key={asset}>{asset}</option>)}
                         </select>
-                        <select value={interval} onChange={(event) => setInterval(event.target.value)} aria-label="Choose timeframe">
+                        <select value={chartInterval} onChange={(event) => setChartInterval(event.target.value)} aria-label="Choose timeframe">
                           {["15m", "1H", "4H", "1D"].map((value) => <option key={value}>{value}</option>)}
                         </select>
                         <button type="button" className="browse-markets-button" onClick={() => { setInstrumentQuery(""); setPickerOpen(true); }}>
@@ -3008,10 +3066,10 @@ export default function TradingDesk() {
 
                       <div className="research-prompt-chips" role="group" aria-label="Quick research prompt starters">
                         <span className="chips-label">Topics:</span>
-                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Analyze ${symbol} on the ${interval} chart. Show both sides and what would change the read.`)}>Structure &amp; Trend</button>
-                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Evaluate RSI momentum, 20/50 EMA structure, and volume confirmation on ${symbol} ${interval}.`)}>Momentum &amp; RSI</button>
-                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Identify immediate support, overhead resistance, and structural invalidation levels for ${symbol} on ${interval}.`)}>Key Levels &amp; Stops</button>
-                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Is ${symbol} compressing for a continuation breakout or showing distribution signs on ${interval}?`)}>Breakout vs Range</button>
+                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Analyze ${symbol} on the ${chartInterval} chart. Show both sides and what would change the read.`)}>Structure &amp; Trend</button>
+                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Evaluate RSI momentum, 20/50 EMA structure, and volume confirmation on ${symbol} ${chartInterval}.`)}>Momentum &amp; RSI</button>
+                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Identify immediate support, overhead resistance, and structural invalidation levels for ${symbol} on ${chartInterval}.`)}>Key Levels &amp; Stops</button>
+                        <button type="button" className="prompt-chip" onClick={() => setQuestion(`Is ${symbol} compressing for a continuation breakout or showing distribution signs on ${chartInterval}?`)}>Breakout vs Range</button>
                       </div>
 
                       <textarea
@@ -3020,7 +3078,7 @@ export default function TradingDesk() {
                         maxLength={600}
                         value={question}
                         onChange={(event) => setQuestion(event.target.value)}
-                        placeholder={`Analyze ${symbol} on the ${interval} timeframe. Show support, resistance, and invalidation.`}
+                        placeholder={`Analyze ${symbol} on the ${chartInterval} timeframe. Show support, resistance, and invalidation.`}
                       />
 
                       <label className={`research-web-option ${includeWebResearch ? "is-active" : ""}`}>
@@ -3072,7 +3130,7 @@ export default function TradingDesk() {
                               ? `Cooldown (${cooldownSeconds}s)`
                               : requestBusy.current
                               ? "Request in progress…"
-                              : `Research ${symbol} (${interval})`}
+                              : `Research ${symbol} (${chartInterval})`}
                           </span>
                         </button>
                       )}
@@ -3086,7 +3144,7 @@ export default function TradingDesk() {
                         <Icon name="trending" size={14} />
                         <strong>Quantitative Pre-Flight &amp; Strategy Lenses</strong>
                       </div>
-                      <span className="preflight-pair-tag">{symbol} · {interval}</span>
+                      <span className="preflight-pair-tag">{symbol} · {chartInterval}</span>
                     </div>
 
                     <div className="preflight-metrics-grid">
@@ -3181,7 +3239,7 @@ export default function TradingDesk() {
                         <button
                           type="button"
                           className="framework-card-btn"
-                          onClick={() => setQuestion(`Analyze ${symbol} on the ${interval} chart using Elliott Wave theory. Map the current impulse (waves 1-5) or corrective (A-B-C) structure, key Fibonacci retracement targets, and price levels that invalidate the count.`)}
+                          onClick={() => setQuestion(`Analyze ${symbol} on the ${chartInterval} chart using Elliott Wave theory. Map the current impulse (waves 1-5) or corrective (A-B-C) structure, key Fibonacci retracement targets, and price levels that invalidate the count.`)}
                         >
                           <div className="framework-btn-header">
                             <span className="framework-icon"><Icon name="wave" size={15} /></span>
@@ -3193,7 +3251,7 @@ export default function TradingDesk() {
                         <button
                           type="button"
                           className="framework-card-btn"
-                          onClick={() => setQuestion(`Assess ${symbol} on ${interval} using the Wyckoff Method. Determine whether current price action represents Accumulation (Phase C/Spring) or Distribution (UTAD), referencing volume spread.`)}
+                          onClick={() => setQuestion(`Assess ${symbol} on ${chartInterval} using the Wyckoff Method. Determine whether current price action represents Accumulation (Phase C/Spring) or Distribution (UTAD), referencing volume spread.`)}
                         >
                           <div className="framework-btn-header">
                             <span className="framework-icon"><Icon name="columns" size={15} /></span>
@@ -3205,7 +3263,7 @@ export default function TradingDesk() {
                         <button
                           type="button"
                           className="framework-card-btn"
-                          onClick={() => setQuestion(`Analyze ${symbol} ${interval} through Smart Money Concepts (SMC). Identify unmitigated Fair Value Gaps (FVG), order blocks, and where institutional liquidity pools reside.`)}
+                          onClick={() => setQuestion(`Analyze ${symbol} ${chartInterval} through Smart Money Concepts (SMC). Identify unmitigated Fair Value Gaps (FVG), order blocks, and where institutional liquidity pools reside.`)}
                         >
                           <div className="framework-btn-header">
                             <span className="framework-icon"><Icon name="target" size={15} /></span>
@@ -3217,7 +3275,7 @@ export default function TradingDesk() {
                         <button
                           type="button"
                           className="framework-card-btn"
-                          onClick={() => setQuestion(`Evaluate multi-indicator confluence on ${symbol} ${interval}. Compare 20/50 EMA slope, RSI momentum divergence, and Bollinger Band width to formulate a high-probability trade hypothesis.`)}
+                          onClick={() => setQuestion(`Evaluate multi-indicator confluence on ${symbol} ${chartInterval}. Compare 20/50 EMA slope, RSI momentum divergence, and Bollinger Band width to formulate a high-probability trade hypothesis.`)}
                         >
                           <div className="framework-btn-header">
                             <span className="framework-icon"><Icon name="bolt" size={15} /></span>
@@ -3301,7 +3359,7 @@ export default function TradingDesk() {
                         <span className="scope-check"><Icon name="check" size={10} /></span>
                         <div>
                           <strong>Bitget Spot Candles</strong>
-                          <small>100 completed {interval} bars with volume</small>
+                          <small>100 completed {chartInterval} bars with volume</small>
                         </div>
                       </li>
                       <li>
@@ -3371,7 +3429,7 @@ export default function TradingDesk() {
               {researchLoading ? (
                 <ResearchLoadingSkeleton
                   symbol={symbol}
-                  interval={interval}
+                  interval={chartInterval}
                   elapsed={researchElapsed}
                   aiModel={aiModel}
                   includeWebResearch={includeWebResearch}
@@ -3397,19 +3455,19 @@ export default function TradingDesk() {
                     </p>
                   </div>
                   <div className="guide-cards-grid">
-                    <div className="guide-card" onClick={() => setQuestion(`Analyze ${symbol} on the ${interval} chart. Show both sides and what would change the read.`)}>
+                    <div className="guide-card" onClick={() => setQuestion(`Analyze ${symbol} on the ${chartInterval} chart. Show both sides and what would change the read.`)}>
                       <div className="guide-card-icon"><Icon name="trending" size={16} /></div>
                       <h3>Structure &amp; Multi-Horizon Trend</h3>
                       <p>Inspect higher-high progression, EMA 20/50 support shelves, and multi-day returns across 24h, 72h, and 168h windows.</p>
                       <span className="guide-card-action">Use hypothesis &rarr;</span>
                     </div>
-                    <div className="guide-card" onClick={() => setQuestion(`Evaluate RSI momentum, 20/50 EMA structure, and volume confirmation on ${symbol} ${interval}.`)}>
+                    <div className="guide-card" onClick={() => setQuestion(`Evaluate RSI momentum, 20/50 EMA structure, and volume confirmation on ${symbol} ${chartInterval}.`)}>
                       <div className="guide-card-icon"><Icon name="scan" size={16} /></div>
                       <h3>Momentum &amp; Volume Exhaustion</h3>
                       <p>Detect RSI divergence, 20-bar volume acceleration, and whether recent tests of resistance happened on thin liquidity.</p>
                       <span className="guide-card-action">Use hypothesis &rarr;</span>
                     </div>
-                    <div className="guide-card" onClick={() => setQuestion(`Identify immediate calculated support, overhead resistance, and structural invalidation levels for ${symbol} on the ${interval}.`)}>
+                    <div className="guide-card" onClick={() => setQuestion(`Identify immediate calculated support, overhead resistance, and structural invalidation levels for ${symbol} on the ${chartInterval}.`)}>
                       <div className="guide-card-icon"><Icon name="shield" size={16} /></div>
                       <h3>Key Levels &amp; Trade Invalidation</h3>
                       <p>Define precise price markers where the prevailing directional bias fails, preventing high-slippage emotional exits.</p>
@@ -3441,8 +3499,8 @@ export default function TradingDesk() {
                 ) : null}
                 <div className="strategy-builder-controls">
                   <label className="strategy-symbol" htmlFor="backtest-symbol"><span>Market</span><select id="backtest-symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)}>{selectableSymbols.map((asset) => <option key={asset}>{asset}</option>)}</select></label>
-                  <label className="interval-control"><span>Test interval</span><select value={interval} onChange={(event) => { const nextInterval = event.target.value; setInterval(nextInterval); if (!supportsBacktestWindow(nextInterval, backtestDays)) setBacktestDays(nextInterval === "1D" ? 90 : 30); }} aria-label="Backtest interval">{["15m", "1H", "4H", "1D"].map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label className="backtest-control"><span>History window</span><select value={backtestDays} onChange={(event) => setBacktestDays(Number(event.target.value))}>{[7, 30, 90, 180, 365].map((days) => <option key={days} value={days} disabled={!supportsBacktestWindow(interval, days)}>{days} days</option>)}</select></label>
+                  <label className="interval-control"><span>Test interval</span><select value={chartInterval} onChange={(event) => { const nextInterval = event.target.value; setChartInterval(nextInterval); if (!supportsBacktestWindow(nextInterval, backtestDays)) setBacktestDays(nextInterval === "1D" ? 90 : 30); }} aria-label="Backtest interval">{["15m", "1H", "4H", "1D"].map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label className="backtest-control"><span>History window</span><select value={backtestDays} onChange={(event) => setBacktestDays(Number(event.target.value))}>{[7, 30, 90, 180, 365].map((days) => <option key={days} value={days} disabled={!supportsBacktestWindow(chartInterval, days)}>{days} days</option>)}</select></label>
                   <label className="backtest-control"><span>Fee / fill (bps)</span><input type="number" min="0" max="1000" step="1" value={feeBps} onChange={(event) => setFeeBps(Number(event.target.value))} /></label>
                   <label className="backtest-control"><span>Slippage / fill (bps)</span><input type="number" min="0" max="1000" step="1" value={slippageBps} onChange={(event) => setSlippageBps(Number(event.target.value))} /></label>
                   <button type="button" className="browse-markets-button" onClick={() => { setInstrumentQuery(""); setPickerOpen(true); }}><Icon name="search" size={13} /> Browse markets</button>
@@ -3472,7 +3530,7 @@ export default function TradingDesk() {
                     <button
                       type="submit"
                       className="button button-primary"
-                      disabled={aiConfigured === false || strategyPrompt.trim().length < 8 || !supportsBacktestWindow(interval, backtestDays) || requestBusy.current || cooldownSeconds > 0}
+                      disabled={aiConfigured === false || strategyPrompt.trim().length < 8 || !supportsBacktestWindow(chartInterval, backtestDays) || requestBusy.current || cooldownSeconds > 0}
                     >
                       {cooldownSeconds > 0
                         ? `Cooldown (${cooldownSeconds}s)`
@@ -3488,7 +3546,7 @@ export default function TradingDesk() {
               {backtestLoading ? (
                 <BacktestLoadingStatus
                   symbol={symbol}
-                  interval={interval}
+                  interval={chartInterval}
                   days={backtestDays}
                   elapsed={backtestElapsed}
                   aiModel={aiModel}
@@ -4053,7 +4111,7 @@ export default function TradingDesk() {
                       className="strategy-template-card"
                       onClick={() => {
                         setSymbol("BTCUSDT");
-                        setInterval("1H");
+                        setChartInterval("1H");
                         setBacktestDays(30);
                         setStrategyPrompt("Go long when the 20-period EMA crosses above the 50-period EMA. Exit when the 20 EMA crosses below the 50 EMA.");
                         window.scrollTo({ top: 180, behavior: "smooth" });
@@ -4074,7 +4132,7 @@ export default function TradingDesk() {
                       className="strategy-template-card"
                       onClick={() => {
                         setSymbol("ETHUSDT");
-                        setInterval("15m");
+                        setChartInterval("15m");
                         setBacktestDays(14);
                         setStrategyPrompt("Enter long when 14-period RSI drops below 30 and crosses back above 30. Exit when RSI rises above 65.");
                         window.scrollTo({ top: 180, behavior: "smooth" });
@@ -4095,7 +4153,7 @@ export default function TradingDesk() {
                       className="strategy-template-card"
                       onClick={() => {
                         setSymbol("SOLUSDT");
-                        setInterval("4H");
+                        setChartInterval("4H");
                         setBacktestDays(90);
                         setStrategyPrompt("Go long when price is above the 50 EMA and the 20 EMA is rising. Exit when price closes below the 50 EMA.");
                         window.scrollTo({ top: 180, behavior: "smooth" });
@@ -4116,7 +4174,7 @@ export default function TradingDesk() {
                       className="strategy-template-card"
                       onClick={() => {
                         setSymbol("BTCUSDT");
-                        setInterval("1D");
+                        setChartInterval("1D");
                         setBacktestDays(180);
                         setStrategyPrompt("Go long when EMA 9 crosses above EMA 21 on the daily chart. Exit on reverse cross with 5 bps slippage assumption.");
                         window.scrollTo({ top: 180, behavior: "smooth" });
@@ -4200,10 +4258,10 @@ export default function TradingDesk() {
                       <button
                         key={intvl}
                         type="button"
-                        className={`replay-interval-pill ${interval === intvl ? "active" : ""}`}
-                        onClick={() => setInterval(intvl)}
+                        className={`replay-interval-pill ${chartInterval === intvl ? "active" : ""}`}
+                        onClick={() => setChartInterval(intvl)}
                         role="radio"
-                        aria-checked={interval === intvl}
+                        aria-checked={chartInterval === intvl}
                       >
                         {intvl}
                       </button>
@@ -4327,7 +4385,7 @@ export default function TradingDesk() {
                       <div>
                         <h2 id="replay-chart-heading">Historical Candlestick Action</h2>
                         <p className="replay-chart-subtitle">
-                          {symbol} · {interval} · Bar {replayIndex + 1} of {effectiveMarket?.candles.length ?? 0}
+                          {symbol} · {chartInterval} · Bar {replayIndex + 1} of {effectiveMarket?.candles.length ?? 0}
                           {isCutMode ? " · [CUT MODE: click candle to rewind]" : ""}
                         </p>
                       </div>
@@ -4349,7 +4407,7 @@ export default function TradingDesk() {
                       <PriceChart
                         height={380}
                         candles={chartCandles}
-                        label={`${symbol} ${interval} historical replay chart`}
+                        label={`${symbol} ${chartInterval} historical replay chart`}
                         indicators={liveIndicators}
                         isCutMode={isCutMode}
                         replayBrackets={replayBracketsConfig}
@@ -5501,7 +5559,7 @@ export default function TradingDesk() {
                       className="button button-primary"
                       onClick={() => {
                         setSymbol(activePaperPlaybook.symbol);
-                        setInterval(activePaperPlaybook.interval);
+                        setChartInterval(activePaperPlaybook.interval);
                         setOrderSide("buy");
                         setOrderOpen(true);
                       }}
@@ -5906,7 +5964,7 @@ export default function TradingDesk() {
                           className="button button-secondary starter-brief-btn"
                           onClick={() => {
                             setSymbol("BTCUSDT");
-                            setInterval("1H");
+                            setChartInterval("1H");
                             setQuestion("Analyze BTCUSDT on the 1H chart. Show both sides and what would change the read.");
                             setView("research");
                           }}
@@ -5919,7 +5977,7 @@ export default function TradingDesk() {
                           className="button button-secondary starter-brief-btn"
                           onClick={() => {
                             setSymbol("ETHUSDT");
-                            setInterval("15m");
+                            setChartInterval("15m");
                             setQuestion("Evaluate RSI momentum, 20/50 EMA structure, and volume confirmation on ETHUSDT 15m.");
                             setView("research");
                           }}
@@ -5932,7 +5990,7 @@ export default function TradingDesk() {
                           className="button button-secondary starter-brief-btn"
                           onClick={() => {
                             setSymbol("SOLUSDT");
-                            setInterval("4H");
+                            setChartInterval("4H");
                             setQuestion("Is SOLUSDT compressing for a continuation breakout or showing distribution/exhaustion signs on 4H?");
                             setView("research");
                           }}
@@ -6248,7 +6306,7 @@ export default function TradingDesk() {
                           className="button button-secondary"
                           onClick={() => {
                             setSymbol(activeJournalPreview.symbol);
-                            setInterval(activeJournalPreview.interval);
+                            setChartInterval(activeJournalPreview.interval);
                             setOrderSide("buy");
                             setOrderOpen(true);
                           }}
@@ -6705,7 +6763,7 @@ export default function TradingDesk() {
           }
         }}
         onToggleMatrix={() => setDeskLayout((prev) => (prev === "single" ? "grid" : "single"))}
-        onSetInterval={(int) => setInterval(int)}
+        onSetInterval={(int) => setChartInterval(int)}
       />
 
       <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
@@ -6874,7 +6932,7 @@ export default function TradingDesk() {
         isOpen={copilotOpen}
         onClose={() => setCopilotOpen(false)}
         symbol={symbol}
-        interval={interval}
+        interval={chartInterval}
         activeView={view}
         marketSnapshot={copilotMarketSnapshot}
         paperSnapshot={copilotPaperSnapshot}
@@ -6894,7 +6952,7 @@ export default function TradingDesk() {
         scorecard={replayScorecard}
         closedTrades={replayWallet.closedTrades}
         symbol={symbol}
-        interval={interval}
+        interval={chartInterval}
         onRestartReplay={handleRestartReplay}
         onClose={handleCloseScorecard}
       />

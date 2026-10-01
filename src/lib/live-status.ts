@@ -98,17 +98,47 @@ export function shouldAttemptReconnect(attempt: number): boolean {
 }
 
 /**
+ * How far a timestamp may sit in the future and still count as fresh.
+ *
+ * Bitget stamps its WebSocket ticks with the exchange's own clock, which is not
+ * ours. Measured against a live feed, every ticker frame arrived between 760 ms
+ * and 964 ms ahead of `Date.now()` on a healthy connection — the skew is
+ * ordinary network-and-clock jitter, not a sign of anything wrong with the data.
+ *
+ * Treating that skew as "maximally stale" was a real bug: the quote was a
+ * fraction of a second old, arriving over a socket that was demonstrably open,
+ * yet the badge read "Data Stalled" and `isQuoteActionable` rejected it. Because
+ * `market.asOf` is advanced by each WS tick, this pinned the desk to a stalled
+ * feed for as long as the socket was healthy, and made every paper order fail
+ * its freshness guard with "Refresh the market quote before recording this
+ * order" — on a quote that was fresh.
+ *
+ * Five seconds is chosen to sit far above observed jitter (~1 s) and far below
+ * both `MAX_QUOTE_AGE_MS` and any skew that would indicate a genuinely broken
+ * timestamp. Inside the window the age clamps to 0, which is the honest answer:
+ * we received it just now. Outside it, `Infinity` — an unproven timestamp stays
+ * unproven, so a badly corrupt or far-future stamp can never drive an
+ * irreversible action.
+ */
+const FUTURE_SKEW_TOLERANCE_MS = 5_000;
+
+/**
  * Age of a quote in milliseconds.
  *
- * An absent, non-finite or future-dated timestamp yields `Infinity`, which
- * reads as "maximally stale" — the safe direction for every gate below. A
- * future timestamp can happen: the server clocks and Bitget's are not the same
- * clock, and treating a skew as "fresh" would let an action through unverified.
+ * An absent or non-finite timestamp yields `Infinity`, which reads as "maximally
+ * stale" — the safe direction for every gate below.
+ *
+ * A future-dated timestamp is handled in two bands rather than one. Within
+ * `FUTURE_SKEW_TOLERANCE_MS` it clamps to `0`: that is exchange-clock jitter on
+ * a quote we have just received, and calling it stale breaks the app on a
+ * perfectly healthy feed. Beyond the tolerance it stays `Infinity`, because a
+ * timestamp that far ahead is not jitter and cannot be vouched for.
  */
 export function quoteAgeMs(asOf: number | null | undefined, now: number = Date.now()): number {
   if (typeof asOf !== "number" || !Number.isFinite(asOf)) return Infinity;
   const age = now - asOf;
-  return age < 0 ? Infinity : age;
+  if (age >= 0) return age;
+  return -age <= FUTURE_SKEW_TOLERANCE_MS ? 0 : Infinity;
 }
 
 /**

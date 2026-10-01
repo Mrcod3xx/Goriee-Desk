@@ -51,11 +51,38 @@ describe("quoteAgeMs", () => {
     assert.equal(quoteAgeMs(-Infinity, NOW), Infinity);
   });
 
-  test("a future timestamp is stale, not negative", () => {
+  test("a far-future timestamp is stale, not negative", () => {
     // Bitget's clock and ours are not the same clock. Returning a negative age
-    // would make the quote look freshly minted forever, so skew resolves to the
-    // safe side: unproven means unactionable.
+    // would make the quote look freshly minted forever, so a skew beyond the
+    // tolerance resolves to the safe side: unproven means unactionable.
     assert.equal(quoteAgeMs(NOW + 60_000, NOW), Infinity);
+  });
+
+  test("exchange-clock jitter inside the tolerance is fresh, not stale", () => {
+    // Measured against a live Bitget feed, every ticker frame arrived 760-964 ms
+    // ahead of Date.now(). Treating that as stale pinned the badge to "Data
+    // Stalled" on a healthy socket and made every paper order fail its
+    // freshness guard, so sub-tolerance skew clamps to 0.
+    assert.equal(quoteAgeMs(NOW + 1, NOW), 0);
+    assert.equal(quoteAgeMs(NOW + 964, NOW), 0);
+    assert.equal(quoteAgeMs(NOW + 5_000, NOW), 0);
+  });
+
+  test("the future tolerance boundary is inclusive then jumps to stale", () => {
+    // Exactly five seconds ahead is still explainable as jitter; one millisecond
+    // further is not, and must not be laundered into a fresh quote.
+    assert.equal(quoteAgeMs(NOW + 5_000, NOW), 0);
+    assert.equal(quoteAgeMs(NOW + 5_001, NOW), Infinity);
+  });
+
+  test("the tolerance never makes a future quote actionable beyond the limit", () => {
+    assert.equal(isQuoteActionable(NOW + 964, NOW), true);
+    assert.equal(isQuoteActionable(NOW + 60_000, NOW), false);
+  });
+
+  test("describeQuoteAge reports jitter as fresh rather than unknown", () => {
+    assert.equal(describeQuoteAge(NOW + 964, NOW), "0s old");
+    assert.equal(describeQuoteAge(NOW + 60_000, NOW), "timestamp unknown");
   });
 
   test("defaults to the current wall clock", () => {

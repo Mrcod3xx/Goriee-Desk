@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Re-usable indicator math implemented in pure JS to test core formulas
 function calculateEMA(values, period) {
@@ -1315,4 +1318,88 @@ test("Trade Replay Review: spoiler-free phase reveal and floating P&L at the pla
   assert.equal(calculateReviewUnrealizedPct(long, null), null);
   assert.equal(calculateReviewUnrealizedPct(long, -5), null);
   assert.equal(calculateReviewUnrealizedPct({ side: "sell", entryPrice: 0 }, 110), null);
+});
+
+/**
+ * Shadow guard: no local binding in `src/` may be named after a timer global.
+ *
+ * Why this is a test and not a lint rule: the repo carries an `eslint`
+ * devDependency but has no ESLint config and no CI, so a rule would never run.
+ * `node --test` is the suite the project actually executes, so the invariant
+ * lives here.
+ *
+ * The bug this prevents is silent. `const [interval, setInterval] = useState("1H")`
+ * shadows `window.setInterval` for the whole component, so a later
+ * `setInterval(fn, ms)` schedules nothing: React calls `fn` as a state updater
+ * with the previous state and stores its return value. The timer never runs and
+ * the state becomes `undefined`. Nothing throws, nothing logs, the UI just
+ * stops refreshing. It sat undetected in trading-desk.tsx for months.
+ */
+test("Static analysis: no timer global is shadowed by a local binding in src/", () => {
+  const TIMER_GLOBALS = ["setInterval", "setTimeout", "clearInterval", "clearTimeout"];
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+
+  /** Every TS/JS source file under a directory, recursively. */
+  function collectSources(dir, out = []) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) collectSources(full, out);
+      else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) out.push(full);
+    }
+    return out;
+  }
+
+  const sources = collectSources(srcDir);
+  assert.ok(sources.length > 20, `expected to scan the real source tree, found ${sources.length} files`);
+
+  const violations = [];
+
+  for (const file of sources) {
+    const lines = readFileSync(file, "utf8").split("\n");
+
+    lines.forEach((rawLine, index) => {
+      // Prose that merely mentions a global must not count — e.g. the guard
+      // note above the `chartInterval` declaration, or `window.setInterval`.
+      // Stripping comments and qualified accesses leaves only real bindings.
+      const line = rawLine
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/\/\/.*$/, " ")
+        .replace(/\bwindow\s*\.\s*/g, "")
+        .replace(/\bglobalThis\s*\.\s*/g, "");
+
+      for (const name of TIMER_GLOBALS) {
+        const bindingForms = [
+          // `const setInterval = ...` / `let setInterval: number = ...`
+          [`\\b(?:const|let|var)\\s+${name}\\b`, "declaration"],
+          // `const [interval, setInterval] = useState(...)` — the original bug
+          [`,\\s*${name}\\s*\\]\\s*=`, "array destructuring"],
+          // `function setInterval(...)`
+          [`\\bfunction\\s*\\*?\\s*${name}\\s*\\(`, "function declaration"],
+          // `const { setInterval } = ...` and import bindings
+          [`[{,]\\s*${name}\\s*(?::[^,}=]*)?[,}]`, "object destructuring or import"],
+          // a parameter named after the global: `(setInterval)` / `(a, setInterval)`
+          [`[(,]\\s*${name}\\s*(?::[^,)]*)?\\s*[,)]`, "parameter"],
+          // `catch (setInterval)`
+          [`\\bcatch\\s*\\(\\s*${name}\\s*\\)`, "catch binding"],
+        ];
+
+        for (const [pattern, kind] of bindingForms) {
+          if (new RegExp(pattern).test(line)) {
+            const rel = file.slice(fileURLToPath(new URL("../", import.meta.url)).length);
+            violations.push(`${rel}:${index + 1} binds \`${name}\` (${kind})\n      ${rawLine.trim()}`);
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    "Timer globals are shadowed by local bindings. Rename the binding (e.g. `chartInterval` / " +
+      "`setChartInterval`) or call the global as `window.setInterval(...)`. A shadowed setter " +
+      "silently turns every timer call into a React state update:\n    " +
+      violations.join("\n    ")
+  );
 });
