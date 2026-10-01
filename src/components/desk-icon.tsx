@@ -1,6 +1,11 @@
 "use client";
 
-export function Icon({ name, size = 18 }: { name: string; size?: number }) {
+import { memo } from "react";
+
+// Memoized because Icon is rendered 134 times across the desk and every one of
+// those instances used to re-render on each WebSocket price tick. Props are
+// primitives, so the default shallow compare is exact and always bails out.
+export const Icon = memo(function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const common = {
     width: size,
     height: size,
@@ -46,4 +51,4 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     history: <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></>,
   };
   return <svg {...common}>{paths[name] ?? paths.grid}</svg>;
-}
+});

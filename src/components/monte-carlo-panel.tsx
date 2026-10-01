@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { CompletedTrade } from "@/lib/backtest";
 import { runMonteCarloSimulation, type MonteCarloResult } from "@/lib/monte-carlo";
 
@@ -9,7 +9,11 @@ type MonteCarloPanelProps = {
   startingBalance?: number;
 };
 
-export function MonteCarloPanel({ trades, startingBalance = 10000 }: MonteCarloPanelProps) {
+// Memoized: trades is backtest.trades (stable ref until a new backtest lands) and
+// startingBalance is a number, so the shallow compare is exact. The internal
+// reseed/jitter state still triggers re-renders normally, as memo only gates
+// parent-driven updates.
+export const MonteCarloPanel = memo(function MonteCarloPanel({ trades, startingBalance = 10000 }: MonteCarloPanelProps) {
   const [jitterBps, setJitterBps] = useState(5);
   const [reseedKey, setReseedKey] = useState(0);
 
@@ -247,4 +251,4 @@ export function MonteCarloPanel({ trades, startingBalance = 10000 }: MonteCarloP
       </div>
     </section>
   );
-}
+});

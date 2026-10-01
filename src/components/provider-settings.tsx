@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 type ProviderId = "nvidia" | "openrouter" | "openai" | "anthropic" | "unorouter" | "custom";
 type ProviderStatus = {
@@ -112,7 +112,10 @@ const quickModels: Array<{
   },
 ];
 
-export function ProviderSettings() {
+// Takes no props at all, so memo() is trivially exact: the Settings tab re-renders
+// on every WebSocket tick in the parent, but this panel only needs to update when
+// its own internal state changes.
+export const ProviderSettings = memo(function ProviderSettings() {
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [provider, setProvider] = useState<ProviderId>("openrouter");
   const [baseUrl, setBaseUrl] = useState(presets.openrouter.baseUrl);
@@ -428,4 +431,4 @@ export function ProviderSettings() {
       </section>
     </>
   );
-}
+});

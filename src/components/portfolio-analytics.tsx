@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { memo, useMemo, useState, useRef } from "react";
 import {
   buildEquityCurve,
   buildDrawdownSeries,
@@ -819,7 +819,11 @@ function AllocationDonut({ data }: { data: Array<{ symbol: string; value: number
   );
 }
 
-export function PortfolioAnalytics({
+// Memoized: trades (closedPaperTrades) / openPositions / cashBalance are useMemo in
+// the parent and startingCapital is a module const, so they hold their reference across
+// WebSocket ticks. quotes is parent state that only changes on a REST poll. The shallow
+// compare is therefore exact and this 1,140-line panel stops recomputing on every tick.
+export const PortfolioAnalytics = memo(function PortfolioAnalytics({
   trades,
   startingCapital,
   openPositions,
@@ -1136,4 +1140,4 @@ export function PortfolioAnalytics({
       </section>
     </div>
   );
-}
+});

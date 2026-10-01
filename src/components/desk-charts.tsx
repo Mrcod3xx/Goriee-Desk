@@ -1,10 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { ClosedPaperTrade, BacktestResult } from "@/components/desk-types";
 import { formatMoney, formatDate } from "@/components/desk-shared";
 
-export function CumulativePnlChart({ trades }: { trades: ClosedPaperTrade[] }) {
+// These three are pure presentational charts fed referentially stable props
+// (closedPaperTrades is a useMemo, backtest.equity/backtest.trades come straight
+// off state). Memoizing them stops the SVG path recomputation from running on
+// every WebSocket price tick.
+export const CumulativePnlChart = memo(function CumulativePnlChart({ trades }: { trades: ClosedPaperTrade[] }) {
   const data = useMemo(() => {
     if (trades.length < 2) return null;
     const chronological = [...trades].sort((a, b) => a.closedAt - b.closedAt);
@@ -87,18 +91,18 @@ export function CumulativePnlChart({ trades }: { trades: ClosedPaperTrade[] }) {
       </div>
     </section>
   );
-}
+});
 
-export function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
+export const Stat = memo(function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
   return (
     <div className="stat-cell">
       <span className="stat-label">{label}</span>
       <span className={`stat-value ${tone ? `tone-${tone}` : ""}`}>{value}</span>
     </div>
   );
-}
+});
 
-export function EquityChart({ points }: { points: BacktestResult["equity"] }) {
+export const EquityChart = memo(function EquityChart({ points }: { points: BacktestResult["equity"] }) {
   const values = points.map((point) => point.value);
   if (values.length < 2) return <div className="chart-empty">Not enough candles to draw a curve.</div>;
   const benchmarkValues = points.map((p) => p.benchmarkValue ?? p.value);
@@ -137,4 +141,4 @@ export function EquityChart({ points }: { points: BacktestResult["equity"] }) {
       <div className="chart-footer"><span>{formatDate(points[0].time, false)}</span><span>{formatDate(points.at(-1)!.time, false)}</span></div>
     </div>
   );
-}
+});

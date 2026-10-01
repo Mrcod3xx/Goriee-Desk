@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { captureWorkspace, parseWorkspaceBackup, restoreWorkspace, type WorkspaceSnapshot } from "@/lib/workspace-backup";
 
 function download(snapshot: WorkspaceSnapshot, prefix = "goriee-backup") {
@@ -11,7 +11,9 @@ function download(snapshot: WorkspaceSnapshot, prefix = "goriee-backup") {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function WorkspaceBackup() {
+// Takes no props, so memo() is exact. Rendered alongside ProviderSettings on the
+// Settings tab; this stops it re-rendering on every parent WebSocket tick.
+export const WorkspaceBackup = memo(function WorkspaceBackup() {
   const [pending, setPending] = useState<WorkspaceSnapshot | null>(null);
   const [message, setMessage] = useState("");
   return <section className="panel workspace-backup" aria-labelledby="backup-heading">
@@ -39,4 +41,4 @@ export function WorkspaceBackup() {
     }}>Replace workspace with this backup</button><button className="button button-secondary" onClick={() => setPending(null)}>Cancel restore</button></div> : null}
     {message ? <p role="status">{message}</p> : null}
   </section>;
-}
+});
