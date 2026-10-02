@@ -11,6 +11,7 @@ A research-first trading desk prototype for the Bitget AI Base Camp Hackathon. I
 - [Tech stack](#tech-stack)
 - [Run locally](#run-locally)
 - [Configuration](#configuration)
+- [AI Providers & Model Switching Guide](#ai-providers--model-switching-guide)
 - [Project structure](#project-structure)
 - [API routes](#api-routes)
 - [Browser data storage](#browser-data-storage)
@@ -95,6 +96,110 @@ The API key is read only by server routes and is never sent to the browser. Do n
 | `GORIEE_TEST_BASE_URL` | test runs | Overrides the base URL that `test/api.test.mjs` targets (default: `127.0.0.1:3000`, auto-started if nothing is listening). |
 | `GORIEE_RUN_LIVE_AI_TESTS=1` | test runs | Opt-in flag that enables the live LLM research test, which calls a real paid provider. Skipped by default. |
 
+## AI Providers & Model Switching Guide
+
+Goriee AI Desk supports any OpenAI-compatible or Anthropic chat completion model (DeepSeek, Claude, GPT-4o, NVIDIA NIM, or 100% private local Ollama inference) for its Strategy Compiler, Market Research Engine, and Strategy Copilot.
+
+### 1. How to Switch Models
+
+#### Method A: In-Browser GUI (Zero Restart)
+1. Open the application at [http://localhost:3000](http://localhost:3000).
+2. Click **Settings** in the left sidebar navigation.
+3. Select an AI Provider preset (**OpenRouter**, **NVIDIA NIM**, **OpenAI**, **Claude**, or **Custom Router**).
+4. Enter your **API Key** (or use `ollama` for local inference).
+5. Click **Save provider settings**, then click **Test connection / Ping** to verify latency.
+
+#### Method B: Direct `.env.local` Configuration
+Set the configuration keys in `.env.local`:
+```bash
+LLM_BASE_URL="https://openrouter.ai/api/v1"
+LLM_MODEL="deepseek/deepseek-r1"
+LLM_API_KEY="sk-or-v1-..."
+```
+The Next.js dev server hot-reloads these environment variables automatically.
+
+---
+
+### 2. Supported AI Providers & Endpoint Matrix
+
+| Provider | Base URL (`LLM_BASE_URL`) | Recommended Model ID (`LLM_MODEL`) | Best For | Tier / Cost |
+| :--- | :--- | :--- | :--- | :--- |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `deepseek/deepseek-r1`<br>`meta-llama/llama-3.3-70b-instruct`<br>`anthropic/claude-3.5-sonnet` | Broadest model access, live web citations, auto-fallback | Free models available; pay-per-token for top tiers |
+| **DeepSeek (Direct)** | `https://api.deepseek.com/v1` | `deepseek-chat` (V3)<br>`deepseek-reasoner` (R1) | Complex reasoning & low token cost | ~$0.14 - $0.55 per 1M tokens |
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o-mini` (Fastest)<br>`gpt-4o` (Flagship) | Reliable structured JSON outputs, ultra-fast response | Developer API billing |
+| **Anthropic Claude** | `https://api.anthropic.com/v1` | `claude-3-5-haiku-20241022`<br>`claude-3-5-sonnet-20241022` | Deep quantitative reasoning & complex conditional rules | Commercial API token billing |
+| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`<br>`z-ai/glm-5.3` | High-throughput enterprise MoE inference | 1,000 free credits upon sign-up |
+| **Local Ollama** *(Private)* | `http://localhost:11434/v1` | `deepseek-r1:14b`<br>`qwen2.5-coder:14b`<br>`llama3.1:8b` | Complete offline privacy, zero API costs | 100% Free (runs locally on GPU/CPU) |
+| **LM Studio / vLLM** | `http://localhost:1234/v1` | Local loaded model name | Local testing with GUI controls | Free local server |
+
+---
+
+### 3. Model Recommendations by Workspace Function
+
+- **Quantitative Backtest Strategy Compiler** (translates natural language into deterministic execution rules):
+  - *Top Choice*: `deepseek/deepseek-r1` or `deepseek-reasoner` — Reasoner models chain thought tokens to guarantee all indicator bounds and exit thresholds match the prompt exactly.
+  - *Speed Choice*: `gpt-4o-mini` — Sub-second latency, deterministic structured JSON output.
+  - *Benchmark Pick*: `claude-3-5-sonnet-20241022` — Deep accuracy on multi-timeframe rules.
+- **Strategy Copilot** (real-time trading assistant, order book imbalance analysis, Kelly sizing):
+  - *Top Choice*: `gpt-4o-mini` or `claude-3-5-haiku-20241022` — Instant response latency during live market observation.
+- **Bullish / Bearish Market Research Engine** (macro context, indicator confluence, invalidation levels):
+  - *Top Choice*: `openrouter.ai` with any modern model — Seamlessly bundles live web search citations.
+
+---
+
+### 4. Step-by-Step Provider Setup Guides
+
+#### DeepSeek (via OpenRouter or Direct API)
+- **Via OpenRouter**: Obtain a key at [openrouter.ai](https://openrouter.ai). In Settings, select **OpenRouter**, set Model ID to `deepseek/deepseek-r1` (or `deepseek/deepseek-chat`), enter your key, and click **Save**.
+- **Via DeepSeek Direct**: Generate an API key at [platform.deepseek.com](https://platform.deepseek.com). In Settings, select **Custom Router**, set API base URL to `https://api.deepseek.com/v1`, Model ID to `deepseek-chat`, and paste your key.
+
+#### OpenAI (GPT-4o / GPT-4o-mini)
+- Generate a developer key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+- In Settings, select **OpenAI API · ChatGPT models**. Model ID defaults to `gpt-4o-mini` (or enter `gpt-4o`), paste your key, and click **Save**.
+
+#### Anthropic Claude
+- Generate an API key at [console.anthropic.com](https://console.anthropic.com).
+- In Settings, select **Claude API · Anthropic**. Model ID defaults to `claude-3-5-haiku-20241022` (or `claude-3-5-sonnet-20241022`), paste your key, and click **Save**.
+
+#### 100% Free & Private Local AI (Ollama)
+Run state-of-the-art models completely on your own machine without sending data to external servers:
+1. Install Ollama from [ollama.com](https://ollama.com).
+2. Pull and run a model:
+   ```bash
+   ollama run deepseek-r1:14b
+   # or for lightweight machines:
+   ollama run qwen2.5:7b
+   ```
+3. In Goriee Desk Settings, select **Custom Router**:
+   - **Base URL**: `http://localhost:11434/v1`
+   - **Model ID**: `deepseek-r1:14b` (or your chosen model)
+   - **API Key**: `ollama` (placeholder)
+4. Click **Save provider settings**, then click **Test connection / Ping**!
+
+---
+
+### 5. Verification & Diagnostics
+
+#### Test Connection in UI
+In **Settings**, click **Test connection / Ping** in the top right:
+- **Success**: Displays green banner with round-trip latency (e.g. `Active connection verified (185ms)`).
+- **Failure**: Displays descriptive error banner with root cause (invalid key, unreachable host, or rate limit).
+
+#### Test Connection via Command Line
+```powershell
+node -e "fetch('http://localhost:3000/api/ai-status').then(r=>r.json()).then(console.log)"
+```
+
+#### Troubleshooting Reference
+
+| Symptom | Cause | Solution |
+| :--- | :--- | :--- |
+| **"AI is not configured"** | Missing API key or base URL in `.env.local` | Open **Settings** in the browser, choose a preset, paste your key, and click Save. |
+| **"Daily quota exceeded / 429"** | Provider free-tier rate limits reached | In Settings, switch to a paid API key or use local Ollama / LM Studio. |
+| **"Invalid JSON object returned"** | Model generated conversational prose around JSON | Ensure your model supports system prompts and JSON mode. DeepSeek, GPT-4o, and Claude natively adhere to strict schemas. |
+| **401 Unauthorized** | Expired or incorrect API key | Re-copy key directly from provider's developer dashboard and re-save in Settings. |
+| **High Latency (> 5s)** | Large reasoning models thinking through proofs | Switch to a faster model like `gpt-4o-mini`, `qwen2.5:14b`, or `claude-3-5-haiku`. |
+
 ## Project structure
 
 ```
@@ -104,6 +209,7 @@ src/
   components/        # React components: trading-desk.tsx (main shell), price-chart.tsx,
                      #   orderbook-panel.tsx, strategy-copilot.tsx, command-palette.tsx,
                      #   parameter-heatmap.tsx, portfolio-analytics.tsx, replay HUD, ...
+  styles/            # Modular stylesheets (tokens, shell, components, charts, workspaces)
   lib/               # Server + shared logic: bitget.ts (REST & indicators), bitget-ws.ts,
                      #   backtest.ts, monte-carlo.ts, parameter-matrix.ts, kelly-sizer.ts,
                      #   order-flow.ts, orderbook.ts, paper-accounting.ts, replay-engine.ts,
@@ -114,8 +220,6 @@ test/                # node:test suites (unit, API, E2E) plus verification scrip
   screenshots/       # High-resolution captures produced by test runs
 docs/                # Intent notes and specs (reliability & safeguards)
 screenshots/         # Viewport captures used in this README
-PROJECT_MEMORY.md    # Detailed agent handoff: architecture, changelog, conventions
-TODO.md              # Refinement backlog
 ```
 
 ## API routes
@@ -218,7 +322,4 @@ Captured from headless Chrome runs, stored in `screenshots/`:
 
 ## Related documentation
 
-- [PROJECT_MEMORY.md](PROJECT_MEMORY.md): full architecture notes, design tokens, storage schemas, and the complete changelog.
-- [TODO.md](TODO.md): current refinement backlog.
 - [docs/intent/reliability-and-safeguards.md](docs/intent/reliability-and-safeguards.md) and [docs/specs/SPEC-reliability-and-safeguards.md](docs/specs/SPEC-reliability-and-safeguards.md): reliability intent and specification.
-- [AI_AGENT_HANDOVER.md](AI_AGENT_HANDOVER.md), [AI_SWITCHING_HANDOUT.md](AI_SWITCHING_HANDOUT.md), [CODEX_HANDOFF_2026-09-25.md](CODEX_HANDOFF_2026-09-25.md): agent handoff history.

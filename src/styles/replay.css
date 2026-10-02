@@ -1,0 +1,2020 @@
+/* ==========================================================================
+   TRADE REPLAY STUDIO & SIMULATOR
+   Part of Modular CSS Migration (C6)
+   ========================================================================== */
+/* ==========================================================================
+   Trade Replay Simulator Styles (HUD Bar, Scrubber, Cut Guide, Scorecard)
+   ========================================================================== */
+
+/* Chart Header Replay Trigger */
+.chart-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   Dedicated Institutional Trade Replay Studio Console
+   ========================================================================== */
+
+.replay-page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.replay-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.replay-header-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  min-height: 38px;
+  border-radius: 6px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: var(--surface, #ffffff);
+  color: var(--brand-deep, #0f442c);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-header-action-btn:hover {
+  background: var(--bg-subtle, #f4f8f5);
+  border-color: var(--brand-deep, #0f442c);
+}
+
+.replay-header-action-btn:active {
+  transform: translateY(1px);
+}
+
+.replay-header-scorecard-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  min-height: 38px;
+  border-radius: 6px;
+  border: 1px solid #0c9a6b;
+  background: #0c9a6b;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-header-scorecard-btn:hover {
+  background: #0a835b;
+  border-color: #0a835b;
+}
+
+.replay-header-scorecard-btn:active {
+  transform: translateY(1px);
+}
+
+.replay-scorecard-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0c9a6b;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+}
+
+/* Replay Ribbon Bar */
+.replay-ribbon-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.replay-ribbon-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.replay-ribbon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #557364;
+}
+
+.replay-ribbon-select {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #fbfdfc;
+  color: var(--brand-deep, #0f442c);
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+}
+
+.replay-ribbon-select:focus {
+  border-color: #0c9a6b;
+  box-shadow: 0 0 0 2px rgba(12, 154, 107, 0.15);
+}
+
+.replay-interval-pills {
+  display: flex;
+  align-items: center;
+  background: #edf4f0;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.replay-interval-pill {
+  padding: 4px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  font-family: var(--font-mono, monospace);
+  border: none;
+  background: transparent;
+  color: #557364;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.replay-interval-pill.active {
+  background: #0c9a6b;
+  color: #ffffff;
+  font-weight: 750;
+}
+
+.replay-ribbon-right {
+  display: flex;
+  align-items: center;
+}
+
+.replay-tape-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: #f4f8f5;
+  border: 1px solid #d2ddd5;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-tape-meta-label {
+  color: #557364;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.replay-tape-meta-price {
+  color: var(--brand-deep, #0f442c);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.replay-tape-meta-time {
+  color: #789283;
+}
+
+/* Replay Studio Grid */
+.replay-studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 350px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .replay-studio-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Left Column: Replay Chart Panel & Seamlessly Docked Transport Console */
+.replay-chart-column {
+  min-width: 0;
+}
+
+.replay-chart-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 8px;
+}
+
+.replay-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid #edf4ef;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.replay-chart-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+  color: var(--brand-deep, #0f442c);
+}
+
+.replay-chart-subtitle {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #557364;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-chart-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.replay-cut-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #f7faf8;
+  color: #12372c;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-cut-mode-btn:hover {
+  background: #edf5f0;
+  border-color: #0c9a6b;
+}
+
+.replay-cut-mode-btn.is-active {
+  background: #0c9a6b;
+  border-color: #0c9a6b;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(12, 154, 107, 0.2);
+}
+
+.replay-cut-mode-btn .cut-icon {
+  font-size: 13px;
+}
+
+/* Docked Institutional Light Studio Transport Console */
+.replay-transport-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 12px;
+  background: #f8faf8;
+  border-top: 1px solid var(--line, #d2ddd5);
+}
+
+.replay-dock-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.replay-dock-timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  font-family: var(--font-mono, monospace);
+  color: #557364;
+}
+
+.replay-dock-scrubber {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #e2ede6;
+  outline: none;
+  cursor: pointer;
+  accent-color: #0c9a6b;
+}
+
+.replay-dock-scrubber::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #0c9a6b;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.replay-dock-scrubber::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.replay-dock-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.replay-dock-rewind-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.replay-dock-chip {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  font-family: var(--font-mono, monospace);
+  border-radius: 6px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #ffffff;
+  color: #12372c;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.replay-dock-chip:hover {
+  background: #edf5f0;
+  border-color: #0c9a6b;
+}
+
+.replay-dock-chip:active {
+  transform: translateY(1px);
+}
+
+.replay-dock-playback-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-dock-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  min-height: 36px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #0c9a6b;
+  border: 1px solid #0c9a6b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-dock-play-btn:hover {
+  background: #0a835b;
+  border-color: #0a835b;
+}
+
+.replay-dock-play-btn:active {
+  transform: translateY(1px);
+}
+
+.replay-dock-play-btn.is-playing {
+  background: #d97706;
+  border-color: #b45309;
+}
+
+.replay-dock-play-btn.is-playing:hover {
+  background: #b45309;
+}
+
+.replay-dock-step-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  min-height: 36px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 650;
+  background: #ffffff;
+  border: 1px solid var(--line, #d2ddd5);
+  color: #12372c;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-dock-step-btn:hover:not(:disabled) {
+  background: #edf5f0;
+  border-color: #0c9a6b;
+}
+
+.replay-dock-step-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.replay-dock-step-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.playback-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: inherit;
+  margin-left: 2px;
+}
+
+.replay-dock-speed-group {
+  display: flex;
+  align-items: center;
+  background: #e9f1ec;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.replay-dock-speed-chip {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 650;
+  font-family: var(--font-mono, monospace);
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: #557364;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.replay-dock-speed-chip.active {
+  background: #ffffff;
+  color: var(--brand-deep, #0f442c);
+  font-weight: 800;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.replay-dock-cut-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 6px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #ffffff;
+  color: #12372c;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-dock-cut-chip:hover {
+  background: #edf5f0;
+  border-color: #0c9a6b;
+}
+
+.replay-dock-cut-chip.active {
+  background: #0c9a6b;
+  border-color: #0c9a6b;
+  color: #ffffff;
+}
+
+.replay-dock-hints {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #789283;
+  border-top: 1px solid #e7eee9;
+  padding-top: 8px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.replay-dock-hints kbd {
+  padding: 1px 4px;
+  background: #ffffff;
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 3px;
+  color: #12372c;
+  font-size: 10px;
+}
+
+.replay-dock-hints .hint-sep {
+  color: #c4d7cc;
+}
+
+/* Right Column: Console Cards */
+.replay-sidebar-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.replay-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(18, 55, 44, 0.04);
+}
+
+.replay-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #edf4ef;
+}
+
+.replay-card-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--brand-deep, #0f442c);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ticket-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #edf4ef;
+  color: #557364;
+  font-family: var(--font-mono, monospace);
+}
+
+.position-badge {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+}
+
+.position-badge.long-badge {
+  background: #e6f7ef;
+  color: #0c9a6b;
+}
+
+.position-badge.short-badge {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* Equity Readout Hero */
+.replay-equity-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px;
+  background: #f7faf8;
+  border-radius: 6px;
+  border: 1px solid #e6efe9;
+  margin-bottom: 12px;
+}
+
+.replay-equity-label {
+  font-size: 10.5px;
+  font-weight: 750;
+  color: #557364;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.replay-equity-value {
+  font-size: 26px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  color: var(--brand-deep, #0f442c);
+}
+
+.replay-equity-pnl {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  margin-top: 4px;
+}
+
+.replay-account-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.account-stat-cell {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #edf4ef;
+  border-radius: 6px;
+}
+
+.account-stat-cell .stat-label {
+  font-size: 11px;
+  color: #557364;
+  margin-bottom: 2px;
+}
+
+.account-stat-cell .stat-val {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: #12372c;
+}
+
+/* Order Ticket */
+.replay-ticket-side-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ticket-side-btn {
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--line, #d2ddd5);
+  background: #f7faf8;
+  color: #557364;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ticket-side-btn.buy-side.active {
+  background: #0c9a6b;
+  border-color: #0c9a6b;
+  color: #ffffff;
+}
+
+.ticket-side-btn.sell-side.active {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.ticket-side-btn:active {
+  transform: translateY(1px);
+}
+
+.replay-ticket-field {
+  margin-bottom: 12px;
+}
+
+.ticket-field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ticket-field-header label {
+  font-size: 12px;
+  font-weight: 650;
+  color: #12372c;
+}
+
+.ticket-size-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.ticket-size-chip {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 4px;
+  background: #ffffff;
+  color: #557364;
+  cursor: pointer;
+}
+
+.ticket-size-chip:hover {
+  background: #edf5f0;
+}
+
+.ticket-size-chip.active {
+  background: #0c9a6b;
+  border-color: #0c9a6b;
+  color: #ffffff;
+}
+
+.replay-ticket-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 650;
+  border: 1px solid var(--line, #d2ddd5);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #12372c;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.replay-ticket-input:focus {
+  border-color: #0c9a6b;
+  box-shadow: 0 0 0 2px rgba(12, 154, 107, 0.15);
+}
+
+.replay-ticket-brackets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ticket-bracket-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ticket-bracket-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.ticket-bracket-header label {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: #12372c;
+}
+
+.bracket-target-price {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #557364;
+}
+
+.replay-ticket-rrr-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  background: #f7faf8;
+  border: 1px solid #edf4ef;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.rrr-label {
+  color: #557364;
+}
+
+.rrr-badge {
+  font-weight: 750;
+  font-family: var(--font-mono, monospace);
+  color: #0c9a6b;
+  background: #e6f7ef;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.replay-ticket-execute-btn {
+  width: 100%;
+  padding: 10px 14px;
+  min-height: 40px;
+  font-size: 13.5px;
+  font-weight: 750;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #ffffff;
+}
+
+.replay-ticket-execute-btn.buy-btn {
+  background: #0c9a6b;
+}
+
+.replay-ticket-execute-btn.buy-btn:hover:not(:disabled) {
+  background: #0a835b;
+}
+
+.replay-ticket-execute-btn.sell-btn {
+  background: #dc2626;
+}
+
+.replay-ticket-execute-btn.sell-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.replay-ticket-execute-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.replay-ticket-execute-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Active Position Body */
+.replay-active-pos-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.active-pos-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.active-pos-metric-row .label {
+  color: #557364;
+}
+
+.active-pos-metric-row .val {
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  color: #12372c;
+}
+
+.active-pos-brackets-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f7faf8;
+  border-radius: 6px;
+  border: 1px solid #edf4ef;
+  margin: 4px 0;
+  font-size: 11.5px;
+}
+
+.active-pos-brackets-row .bracket-title {
+  color: #557364;
+  margin-right: 4px;
+}
+
+.active-pos-brackets-row .bracket-val {
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  color: #12372c;
+}
+
+.replay-close-pos-btn {
+  width: 100%;
+  padding: 8px 12px;
+  min-height: 36px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #ffffff;
+  color: #dc2626;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.replay-close-pos-btn:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+.replay-close-pos-btn:active {
+  transform: translateY(1px);
+}
+
+.replay-flat-state {
+  padding: 18px 12px;
+  text-align: center;
+  background: #fbfdfc;
+  border-radius: 6px;
+  border: 1px dashed var(--line, #d2ddd5);
+}
+
+.flat-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #557364;
+  margin: 0 0 4px;
+}
+
+.flat-desc {
+  font-size: 11.5px;
+  color: #789283;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Closed Trades Mini List */
+.replay-trades-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.replay-trade-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  background: #f7faf8;
+  border: 1px solid #edf4ef;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.trade-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-side-tag {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.trade-side-tag.long-tag {
+  background: #e6f7ef;
+  color: #0c9a6b;
+}
+
+.trade-side-tag.short-tag {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.trade-prices {
+  font-family: var(--font-mono, monospace);
+  color: #557364;
+  font-size: 11.5px;
+}
+
+.trade-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-pnl {
+  font-family: var(--font-mono, monospace);
+  font-weight: 750;
+  font-size: 11.5px;
+}
+
+.trade-reason-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.trade-reason-tag.reason-take_profit {
+  background: #e6f7ef;
+  color: #0c9a6b;
+}
+
+.trade-reason-tag.reason-stop_loss {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.trade-reason-tag.reason-manual {
+  background: #eef2f0;
+  color: #557364;
+}
+
+.replay-scorecard-link-btn {
+  font-size: 12px;
+  font-weight: 650;
+  color: #0c9a6b;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.replay-scorecard-link-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.replay-scorecard-link-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.replay-empty-trades {
+  padding: 14px;
+  text-align: center;
+  color: #789283;
+  font-size: 12px;
+  background: #fbfdfc;
+  border-radius: 6px;
+  border: 1px dashed #edf4ef;
+}
+
+
+/* Replay Scorecard Modal */
+.replay-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 25, 20, 0.72);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.replay-scorecard-modal {
+  width: 100%;
+  max-width: 680px;
+  background: #ffffff;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: scaleInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes scaleInModal {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.replay-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.modal-title-group .modal-icon {
+  font-size: 24px;
+}
+.replay-modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 750;
+  color: #12372c;
+}
+.modal-subtitle {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.replay-modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: #6b8577;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+.replay-modal-close-btn:hover {
+  background: #edf4ef;
+  color: #12372c;
+}
+
+.replay-scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  padding: 18px 22px;
+  background: #f7faf8;
+  border-bottom: 1px solid var(--line);
+}
+.scorecard-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.scorecard-metric-card .metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #557364;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.scorecard-metric-card .metric-value {
+  font-size: 17px;
+  font-weight: 800;
+  color: #143b30;
+  font-family: var(--font-mono, monospace);
+}
+.scorecard-metric-card .metric-sub {
+  font-size: 10.5px;
+  color: #799587;
+}
+
+.replay-trades-section {
+  padding: 16px 22px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.replay-trades-section h4 {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #173b2c;
+}
+.replay-table-wrap {
+  overflow-x: auto;
+}
+.replay-trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.replay-trades-table th {
+  padding: 8px 10px;
+  color: #557364;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--line);
+}
+.replay-trades-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf4ef;
+  color: #143b30;
+}
+.trade-side-pill {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+}
+.trade-side-pill.is-long { background: #d1fae5; color: #065f46; }
+.trade-side-pill.is-short { background: #fee2e2; color: #991b1b; }
+.pnl-cell small { margin-left: 4px; font-size: 11px; }
+.pnl-cell.is-up { color: #059669; }
+.pnl-cell.is-down { color: #dc2626; }
+.exit-reason-badge {
+  font-size: 11px;
+  color: #4b6b5b;
+}
+.no-trades-copy {
+  margin: 12px 0;
+  font-size: 12.5px;
+  color: #6a8577;
+  line-height: 1.5;
+}
+.no-trades-copy code {
+  background: #edf4ef;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.replay-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+  background: #fbfdfc;
+}
+
+/* Hover guideline on chart candles when cut mode is active */
+.candle-cut-guideline {
+  stroke: #10b981;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+.candle-cut-cursor {
+  cursor: crosshair !important;
+}
+
+/* =====================================================================
+   TRADE REPLAY: INTERACTIVE BRACKETS & TRADE TRAJECTORY MARKERS
+   ===================================================================== */
+
+/* Toolbar Markers Toggle Pill */
+.markers-toggle-btn {
+  font-weight: 650;
+  transition: all 0.15s ease;
+}
+.markers-toggle-btn.active {
+  background: #0f442c !important;
+  color: #ffffff !important;
+}
+
+/* Historical Trade Review HUD Strip (Replay mode handoff) */
+.replay-review-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: #f0f7f3;
+  border: 1px solid #b8d9c6;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(12, 154, 107, 0.08);
+}
+
+.replay-review-hud-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.replay-review-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: #0c9a6b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.replay-review-symbol {
+  font-weight: 750;
+  font-size: 14px;
+  color: #12372c;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-review-side {
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 750;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+}
+
+.replay-review-side.is-long {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.replay-review-side.is-short {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.replay-review-metric {
+  color: #375347;
+  font-size: 12px;
+}
+
+.replay-review-metric strong {
+  color: #12372c;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+
+.replay-review-pnl {
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+
+.replay-review-strategy {
+  padding: 2px 8px;
+  background: #ffffff;
+  border: 1px solid #d2ddd5;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #557364;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-review-hud-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.replay-hud-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #ffffff;
+  border: 1px solid #c2d4c8;
+  color: #1a4235;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-hud-action-btn:hover {
+  background: #e6f3eb;
+  border-color: #0c9a6b;
+  color: #0c9a6b;
+}
+
+.replay-hud-exit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 650;
+  background: #ffffff;
+  border: 1px solid #dc2626;
+  color: #dc2626;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.replay-hud-exit-btn:hover {
+  background: #fef2f2;
+}
+
+
+/* Paper Review Quick & Handoff Buttons */
+.paper-review-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paper-replay-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  border-radius: 4px;
+  background: #e6f3eb;
+  border: 1px solid #b8d9c6;
+  color: #0c9a6b;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.paper-replay-quick-btn:hover {
+  background: #0c9a6b;
+  color: #ffffff;
+  border-color: #0c9a6b;
+}
+
+.paper-review-actions-bar {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line, #d2ddd5);
+}
+
+.paper-replay-handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+/* ==========================================================================
+   TRADE REPLAY - REVIEWED TRADE: PROGRESSIVE ENTRY / SL / TP OVERLAY
+   Levels appear only once the tape has actually reached them: nothing before
+   the entry bar, the full bracket while the position is open, and the exit
+   level/pin only on the closing bar (no hindsight leakage).
+   ========================================================================== */
+
+.chart-target-trade-layer {
+  pointer-events: none;
+}
+
+/* Reward (entry -> TP) and risk (entry -> SL) corridors. They fill only as far
+   as the tape has travelled, so the zones visibly grow while the trade runs. */
+.target-trade-corridor {
+  stroke: none;
+}
+
+.target-trade-corridor.corridor-reward {
+  fill: rgba(12, 154, 107, 0.1);
+}
+
+.target-trade-corridor.corridor-risk {
+  fill: rgba(220, 38, 38, 0.1);
+}
+
+.target-trade-corridor.corridor-reward.is-hit {
+  fill: rgba(12, 154, 107, 0.17);
+}
+
+.target-trade-corridor.corridor-risk.is-hit {
+  fill: rgba(220, 38, 38, 0.17);
+}
+
+/* Close-price path the reviewed trade actually took, revealed bar by bar. */
+.target-trade-trajectory {
+  fill: none;
+  stroke: #475569;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+
+/* Vertical event lines answer "when did it get in / get out". */
+.target-trade-event-line {
+  stroke-width: 1.2;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.target-trade-event-line.event-entry {
+  stroke: #2563eb;
+}
+
+.target-trade-event-line.event-exit {
+  stroke: #7c3aed;
+}
+
+/* Horizontal price levels for the reviewed trade. */
+.target-trade-line-entry {
+  stroke: #2563eb;
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
+}
+
+.target-trade-line-tp {
+  stroke: #0c9a6b;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  opacity: 0.7;
+}
+
+.target-trade-line-sl {
+  stroke: #dc2626;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 3;
+  opacity: 0.7;
+}
+
+.target-trade-line-tp.is-hit,
+.target-trade-line-sl.is-hit {
+  stroke-width: 2.2;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+
+.target-trade-line-exit {
+  stroke: #7c3aed;
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
+  opacity: 0.9;
+}
+
+.target-trade-line-exit.is-hit {
+  stroke-width: 2.2;
+  opacity: 1;
+}
+
+/* Event pins. The open-position pin reuses the live pulse animation. */
+.target-trade-pin {
+  stroke-width: 2;
+}
+
+.target-trade-pin.pin-entry {
+  fill: #ffffff;
+  stroke: #2563eb;
+}
+
+.target-trade-pin.pin-live {
+  fill: #ffffff;
+  stroke: #0c9a6b;
+  animation: pulseLivePin 1.6s ease-in-out infinite;
+}
+
+.target-trade-pin.pin-exit {
+  fill: #ffffff;
+  stroke: #7c3aed;
+}
+
+.target-trade-pin.pin-exit.is-win {
+  fill: #0c9a6b;
+  stroke: #ffffff;
+}
+
+.target-trade-pin.pin-exit.is-loss {
+  fill: #dc2626;
+  stroke: #ffffff;
+}
+
+/* On-chart captions. The white halo (paint-order stroke) keeps the labels
+   readable over candles, grid lines and corridors on the white chart. */
+.target-trade-caption {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.target-trade-caption.caption-entry {
+  fill: #1d4ed8;
+}
+
+.target-trade-caption.caption-tp {
+  fill: #047857;
+}
+
+.target-trade-caption.caption-tp.is-hit {
+  fill: #065f46;
+  font-weight: 850;
+}
+
+.target-trade-caption.caption-sl {
+  fill: #dc2626;
+}
+
+.target-trade-caption.caption-sl.is-hit {
+  fill: #b91c1c;
+  font-weight: 850;
+}
+
+.target-trade-caption.caption-live {
+  fill: #0f766e;
+}
+
+.target-trade-caption.caption-exit {
+  fill: #6d28d9;
+}
+
+.target-trade-caption.caption-exit.is-win {
+  fill: #047857;
+}
+
+.target-trade-caption.caption-exit.is-loss {
+  fill: #b91c1c;
+}
+
+/* --------------------------------------------------------------------------
+   Right-rail review tags
+   Dark chips keep parity with the existing bracket pills and stay WCAG AA
+   (near-white text on saturated dark backgrounds). Rendered independently of
+   the live bracket preview so both can coexist on the rail.
+   -------------------------------------------------------------------------- */
+.rail-tag-review {
+  z-index: 14;
+}
+
+.review-tag-bg-entry,
+.review-tag-bg-tp,
+.review-tag-bg-sl,
+.review-tag-bg-win,
+.review-tag-bg-loss {
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+}
+
+.review-tag-bg-entry {
+  background: #1e3a8a;
+  color: #eff6ff;
+  border: 1px solid #3b82f6;
+}
+
+.review-tag-bg-tp {
+  background: #064e3b;
+  color: #ecfdf5;
+  border: 1px solid #059669;
+}
+
+.review-tag-bg-sl {
+  background: #7f1d1d;
+  color: #fef2f2;
+  border: 1px solid #dc2626;
+}
+
+.review-tag-bg-win {
+  background: #064e3b;
+  color: #ecfdf5;
+  border: 1px solid #10b981;
+}
+
+.review-tag-bg-loss {
+  background: #7f1d1d;
+  color: #fef2f2;
+  border: 1px solid #ef4444;
+}
+
+.notch-review.notch-entry {
+  color: #3b82f6;
+}
+
+.notch-review.notch-tp {
+  color: #059669;
+}
+
+.notch-review.notch-sl {
+  color: #dc2626;
+}
+
+.notch-review.notch-win {
+  color: #10b981;
+}
+
+.notch-review.notch-loss {
+  color: #ef4444;
+}
+
+.rail-tag-review.is-hit .rail-chevron-body {
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.3), 0 1px 4px rgba(15, 23, 42, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   HUD phase badge & spoiler-free metrics
+   Tells the viewer whether the tape is before the fill, inside the open
+   position, or past the close. Shared with the Trade Details card badge.
+   -------------------------------------------------------------------------- */
+.replay-review-phase,
+.review-phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.replay-review-phase::before,
+.review-phase-badge::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.phase-pre-entry {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.phase-in-trade {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
+}
+
+.phase-in-trade::before {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.phase-closed {
+  background: #e3f4ec;
+  color: #065f46;
+  border-color: #a7d7c3;
+}
+
+.replay-review-metric.is-pending {
+  color: #557364;
+}
+
+.replay-review-metric.is-pending strong {
+  color: #3d5548;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   Timeline scrubber: ENTRY / EXIT ticks
+   The track wrapper anchors the ticks; the inline `left` uses
+   calc(7.5px + pct * (100% - 15px)) so each tick lines up with the centre of
+   the 15px scrubber thumb rather than the raw track percentage.
+   -------------------------------------------------------------------------- */
+.replay-dock-scrubber-track {
+  position: relative;
+  width: 100%;
+  margin-top: 18px; /* headroom for the floating tick labels */
+}
+
+.scrubber-marker {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scrubber-marker.marker-entry {
+  background: #2563eb;
+}
+
+.scrubber-marker.marker-exit {
+  background: #7c3aed;
+}
+
+.scrubber-marker-label {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.marker-entry .scrubber-marker-label {
+  color: #1d4ed8;
+}
+
+.marker-exit .scrubber-marker-label {
+  color: #6d28d9;
+}
+
+/* --------------------------------------------------------------------------
+   Reviewed Trade Details card
+   Phase-aware readout of the same levels drawn on the chart. Rows stay honest:
+   "Awaiting fill" before entry, "Not recorded" / "Not derivable" when the
+   source trade never carried a bracket or the maths is undefined.
+   -------------------------------------------------------------------------- */
+.review-outcome-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid;
+  border-radius: 10px;
+}
+
+.review-outcome-banner.is-win {
+  background: #e3f4ec;
+  border-color: #a7d7c3;
+}
+
+.review-outcome-banner.is-loss {
+  background: #fbefef;
+  border-color: #e5b8ba;
+}
+
+.review-outcome-label {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.review-outcome-banner.is-win .review-outcome-label {
+  color: #065f46;
+}
+
+.review-outcome-banner.is-loss .review-outcome-label {
+  color: #7f1d1d;
+}
+
+.review-outcome-pnl {
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-outcome-banner.is-win .review-outcome-pnl {
+  color: #047857;
+}
+
+.review-outcome-banner.is-loss .review-outcome-pnl {
+  color: #b91c1c;
+}
+
+.review-outcome-pct {
+  margin-left: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.review-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.review-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 11px;
+  background: var(--surface-soft, #f8faf8);
+  border: 1px solid var(--line, #e1e8e3);
+  border-left: 3px solid #94a3b8;
+  border-radius: 9px;
+}
+
+.review-detail-label {
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted, #4e6055);
+}
+
+.review-detail-value {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink, #172b24);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.review-detail-row.tone-entry {
+  border-left-color: #2563eb;
+}
+
+.review-detail-row.tone-tp {
+  border-left-color: #0c9a6b;
+}
+
+.review-detail-row.tone-tp .review-detail-value {
+  color: #047857;
+}
+
+.review-detail-row.tone-sl {
+  border-left-color: #dc2626;
+}
+
+.review-detail-row.tone-sl .review-detail-value {
+  color: #b91c1c;
+}
+
+.review-detail-row.tone-exit {
+  border-left-color: #7c3aed;
+}
+
+.review-detail-row.tone-exit .review-detail-value {
+  color: #6d28d9;
+}
+
+.review-detail-row.tone-neutral {
+  border-left-color: #94a3b8;
+}
+
+.review-detail-row.tone-muted {
+  border-left-color: #cbd5e1;
+}
+
+.review-detail-row.tone-muted .review-detail-value {
+  color: #475569;
+  font-weight: 600;
+}
+
+.review-detail-row.tone-pending {
+  border-left-color: #cbd5e1;
+  background: #f4f7f4;
+}
+
+.review-detail-row.tone-pending .review-detail-value {
+  color: #475569;
+  font-weight: 600;
+}
+
+.review-detail-row.tone-tp.is-hit {
+  background: #e3f4ec;
+  border-color: #a7d7c3;
+  border-left-color: #0c9a6b;
+}
+
+.review-detail-row.tone-tp.is-hit .review-detail-value {
+  color: #065f46;
+}
+
+.review-detail-row.tone-sl.is-hit {
+  background: #fbefef;
+  border-color: #e5b8ba;
+  border-left-color: #dc2626;
+}
+
+.review-detail-row.tone-sl.is-hit .review-detail-value {
+  color: #7f1d1d;
+}
+
+.review-hint {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #3d5548;
+}
+
+@media (max-width: 640px) {
+  .review-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-outcome-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+

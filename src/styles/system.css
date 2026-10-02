@@ -1,0 +1,322 @@
+/* ==========================================================================
+   SYSTEM STYLES: Crash Safety, Cold Load, Focus Visible & Connection
+   Part of Modular CSS Migration (C8)
+   ========================================================================== */
+
+/* ==========================================================================
+   Antislop & UI/UX Pro Max Overhaul: Unified System Components & Responsive Layout
+   ========================================================================== */
+
+/* Universal Focus Visible Invariant (WCAG AA Compliance) */
+*:focus-visible {
+  outline: 2px solid #0c9a6b !important;
+  outline-offset: 2px !important;
+}
+
+/* Squeeze Pulse Animation */
+@keyframes squeezePulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.55; }
+}
+.squeeze-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-right: 5px;
+  animation: squeezePulse 1.4s ease-in-out infinite;
+}
+
+
+
+
+/* ---------------------------------------------------------------------------
+   Crash-safety and cold-load screens
+   Shared by app/error.tsx, app/not-found.tsx and app/loading.tsx. These render
+   inside the root layout, so the design tokens above are available. app/
+   global-error.tsx cannot use any of this - it renders its own document and
+   must inline everything, so keep these rules for layout-wrapped screens only.
+--------------------------------------------------------------------------- */
+
+.desk-fatal-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.desk-fatal-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  text-align: center;
+  box-shadow: 0 18px 48px -24px rgba(16, 36, 26, 0.35);
+  animation: fadeIn .22s ease-out;
+}
+
+.desk-fatal-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.desk-fatal-icon-quiet { background: var(--jade-soft); color: var(--jade-dark); }
+
+.desk-fatal-card h1 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+
+.desk-fatal-card p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.desk-fatal-code {
+  display: inline-block;
+  margin-bottom: 18px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.desk-fatal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.desk-fatal-primary,
+.desk-fatal-secondary {
+  padding: 10px 20px;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
+}
+
+.desk-fatal-primary {
+  border: 1px solid var(--jade-dark);
+  background: var(--jade);
+  color: #fff;
+}
+
+.desk-fatal-primary:hover { background: var(--jade-dark); transform: translateY(-.5px); }
+
+.desk-fatal-secondary {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.desk-fatal-secondary:hover { border-color: var(--jade); color: var(--jade-dark); }
+
+.desk-fatal-link { text-decoration: none; display: inline-block; }
+
+/* Panel-level boundary fallback (components/error-boundary.tsx) */
+
+.desk-panel-error {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.desk-panel-error-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.desk-panel-error-body { min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.desk-panel-error-body h3 { margin: 0; font-size: 14px; color: var(--ink); }
+.desk-panel-error-body p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.desk-panel-error-code { font-size: 11px; color: var(--subtle); }
+
+.desk-panel-error-action {
+  padding: 7px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+
+.desk-panel-error-action:hover { border-color: var(--jade); color: var(--jade-dark); }
+
+/* Cold-load skeleton (app/loading.tsx) */
+
+.desk-boot {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 24px 18px 40px;
+  display: grid;
+  gap: 18px;
+}
+
+.desk-boot-header { display: flex; align-items: center; gap: 11px; }
+
+.desk-boot-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--forest);
+  color: #fff;
+}
+
+.desk-boot-title { display: grid; }
+.desk-boot-title strong { font-size: 15px; letter-spacing: -.01em; color: var(--ink); }
+.desk-boot-title small { font-size: 12px; color: var(--subtle); }
+
+.desk-boot-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; }
+
+.desk-boot-panel {
+  display: grid;
+  gap: 11px;
+  align-content: start;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.desk-boot-label { font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--subtle); }
+
+.desk-boot-line,
+.desk-boot-block {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-soft) 0%, var(--line) 40%, var(--surface-soft) 80%);
+  background-size: 280% 100%;
+  animation: skeleton-wave 1.35s ease-in-out infinite;
+}
+
+.desk-boot-line { height: 11px; }
+.desk-boot-block { height: 148px; border-radius: var(--radius-sm); }
+
+.desk-boot-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.desk-boot-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--jade);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@media (max-width: 860px) {
+  .desk-boot-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ==========================================================================
+   FEATURE: Connection awareness — background-tab suspension + quote staleness
+   (TODO #9 and the WebSocket half of #10)
+
+   The badge used to be binary (WS Live / REST Polling) for four real states,
+   so "Bitget's socket is down" and "you have no internet" looked identical.
+   These classes render the two states that were missing, plus the banner and
+   the paused-dot treatment for the loops that now suspend while hidden.
+   Colors reuse the amber from .bracket-stale-badge and the red family from
+   .error-banner so staleness reads the same everywhere it appears.
+   ========================================================================== */
+
+/* Badge states. .ws-connected / .ws-fallback already existed above;
+   these complete the set produced by dataFeedPresentation(). */
+.ws-stalled { color: #fcd34d; }
+.ws-offline { color: #fca5a5; }
+
+/* Status dots. .pulse-dot-green / .pulse-dot-gray already existed.
+   The amber dot is static on purpose: a pulsing amber reads as "working",
+   but stalled means data has stopped arriving. Red pulses for offline
+   because that state has a banner demanding attention. */
+.pulse-dot-amber {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+.pulse-dot-red {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+  animation: pulseRed 1.6s infinite;
+}
+@keyframes pulseRed {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Offline banner. Reuses .error-banner for layout, spacing and the retry
+   button; this only shifts the palette from "something broke" to "you are
+   disconnected", which is the user's fault, not ours. */
+.feed-offline-banner {
+  border-color: #f3c9c9;
+  background: #fff7f7;
+}
+.feed-offline-banner strong { color: #7f2d2d; }
+.feed-offline-banner span { color: #8a5252; }
+
+/* Rule runner, third state: switched on but not evaluating because the tab is
+   hidden. Amber, matching the stalled badge, because it is a degradation
+   rather than a deliberate off. */
+.status-suspended {
+  background: #fef7e6;
+  color: #92610e;
+  border: 1px solid #f5d99a;
+}
+
+/* Orderbook dot while its 3s poll is suspended. Keeps the element in flow so
+   the heading does not reflow when the tab is shown again. */
+.live-pulse-dot.paused {
+  background: #94a3b8;
+  box-shadow: none;
+  animation: none;
+  opacity: .6;
+}

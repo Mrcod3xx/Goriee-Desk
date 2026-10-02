@@ -1,0 +1,26 @@
+/* ==========================================================================
+   Design Tokens & Root CSS Custom Properties
+   ========================================================================== */
+
+:root {
+  --page: #f2f5f2;
+  --surface: #ffffff;
+  --surface-soft: #f8faf8;
+  --ink: #172b24;
+  --muted: #4e6055;
+  --subtle: #75867c;
+  --line: #e1e8e3;
+  --line-strong: #d2ddd5;
+  --forest: #143b30;
+  --forest-2: #1a4b3d;
+  --jade: #0c9a6b;
+  --jade-dark: #087b56;
+  --jade-soft: #e3f4ec;
+  --red: #b64c50;
+  --red-soft: #fbefef;
+  --amber: #8b6833;
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 17px;
+  color-scheme: light;
+}

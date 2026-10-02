@@ -80,6 +80,8 @@ export default function TradingDesk() {
   const isReplayActive = view === "replay";
   const [isCutMode, setIsCutMode] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
+  const replayIndexRef = useRef(replayIndex);
+  replayIndexRef.current = replayIndex;
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
   const [replayWallet, setReplayWallet] = useState<ReplayWallet>(() => createInitialReplayWallet());
@@ -1333,6 +1335,45 @@ export default function TradingDesk() {
     });
   }
 
+  function handleBacktestFromJournal(item: JournalItem) {
+    const rep: Report = {
+      id: item.id,
+      question: item.question,
+      symbol: item.symbol,
+      interval: item.interval,
+      market: {
+        symbol: item.symbol,
+        category: "SPOT",
+        interval: item.interval,
+        price: item.price,
+        change24h: item.marketSnapshot?.change24h ?? 0,
+        high24h: item.marketSnapshot?.high24h ?? item.price,
+        low24h: item.marketSnapshot?.low24h ?? item.price,
+        volume24h: item.marketSnapshot?.volume24h ?? 0,
+        turnover24h: item.marketSnapshot?.turnover24h ?? 0,
+        asOf: item.createdAt,
+        candles: [],
+      },
+      indicators: item.indicators ?? {
+        ema20: null,
+        ema50: null,
+        rsi14: 50,
+        support: item.price * 0.98,
+        resistance: item.price * 1.02,
+        rangePct: 2,
+        regime: item.regime,
+      },
+      summary: item.summary,
+      bullCase: item.bullCase ?? "",
+      bearCase: item.bearCase ?? "",
+      invalidation: item.invalidation ?? "",
+      engine: item.engine || "journal-cache",
+      commentary: item.commentary ?? null,
+      createdAt: item.createdAt,
+    };
+    handleBacktestFromReport(rep);
+  }
+
   function paperFromBacktest() {
     if (!backtest) return;
     const plan = backtest.strategy;
@@ -1553,14 +1594,38 @@ export default function TradingDesk() {
   }
 
   // WebSocket Live Ticker Integration
+  const lastWsPriceRef = useRef<number | null>(null);
+  const priceFlashTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (market?.price) {
+      lastWsPriceRef.current = market.price;
+    }
+  }, [market?.price]);
+
   const handleWsTick = useCallback((tick: WsTickerTick) => {
+    const oldPrice = lastWsPriceRef.current;
+    const newPrice = tick.price;
+    if (oldPrice !== null && newPrice !== oldPrice) {
+      lastWsPriceRef.current = newPrice;
+      setPriceFlash(newPrice > oldPrice ? "up" : "down");
+      if (priceFlashTimerRef.current) window.clearTimeout(priceFlashTimerRef.current);
+      priceFlashTimerRef.current = window.setTimeout(() => setPriceFlash(null), 700);
+    } else {
+      lastWsPriceRef.current = newPrice;
+    }
+
     setMarket((prev) => {
       if (!prev || prev.symbol !== tick.symbol) return prev;
-      const oldPrice = prev.price;
-      const newPrice = tick.price;
-      if (newPrice !== oldPrice) {
-        setPriceFlash(newPrice > oldPrice ? "up" : "down");
-        window.setTimeout(() => setPriceFlash(null), 700);
+      if (
+        prev.price === newPrice &&
+        (tick.change24h === undefined || prev.change24h === tick.change24h) &&
+        (tick.high24h === undefined || prev.high24h === tick.high24h) &&
+        (tick.low24h === undefined || prev.low24h === tick.low24h) &&
+        (tick.volume24h === undefined || prev.volume24h === tick.volume24h) &&
+        Math.abs(tick.ts - prev.asOf) < 1000
+      ) {
+        return prev;
       }
       return {
         ...prev,
@@ -1839,21 +1904,21 @@ export default function TradingDesk() {
 
   const handleStepForward = useCallback(() => {
     if (!effectiveMarket) return;
-    setReplayIndex((prev) => {
-      if (prev >= effectiveMarket.candles.length - 1) return prev;
-      const nextIdx = prev + 1;
-      const nextCandle = effectiveMarket.candles[nextIdx];
-      if (nextCandle) {
-        setReplayWallet((w) => {
-          const res = advanceReplayCandle(w, nextCandle);
-          if (res.event) {
-            setToastMessage(`Bracket triggered: ${res.event.reason === "take_profit" ? "Take Profit" : "Stop Loss"} (${res.event.pnl >= 0 ? "+" : ""}$${res.event.pnl.toFixed(2)})`);
-          }
-          return res.wallet;
-        });
-      }
-      return nextIdx;
-    });
+    const prev = replayIndexRef.current;
+    if (prev >= effectiveMarket.candles.length - 1) return;
+    const nextIdx = prev + 1;
+    const nextCandle = effectiveMarket.candles[nextIdx];
+    if (nextCandle) {
+      setReplayWallet((w) => {
+        const res = advanceReplayCandle(w, nextCandle);
+        if (res.event) {
+          const msg = `Bracket triggered: ${res.event.reason === "take_profit" ? "Take Profit" : "Stop Loss"} (${res.event.pnl >= 0 ? "+" : ""}$${res.event.pnl.toFixed(2)})`;
+          window.setTimeout(() => setToastMessage(msg), 0);
+        }
+        return res.wallet;
+      });
+    }
+    setReplayIndex(nextIdx);
   }, [effectiveMarket]);
 
   const handleScrubIndex = useCallback((index: number) => {
@@ -2299,25 +2364,25 @@ export default function TradingDesk() {
     if (!isReplayActive || !isReplayPlaying || !effectiveMarket) return;
     const intervalMs = Math.max(100, Math.round(1000 / replaySpeed));
     const timer = window.setInterval(() => {
-      setReplayIndex((prev) => {
-        if (prev >= effectiveMarket.candles.length - 1) {
-          setIsReplayPlaying(false);
-          setToastMessage("Replay reached the end of history.");
-          return prev;
-        }
-        const nextIdx = prev + 1;
-        const nextCandle = effectiveMarket.candles[nextIdx];
-        if (nextCandle) {
-          setReplayWallet((w) => {
-            const res = advanceReplayCandle(w, nextCandle);
-            if (res.event) {
-              setToastMessage(`Bracket triggered: ${res.event.reason === "take_profit" ? "Take Profit" : "Stop Loss"} (${res.event.pnl >= 0 ? "+" : ""}$${res.event.pnl.toFixed(2)})`);
-            }
-            return res.wallet;
-          });
-        }
-        return nextIdx;
-      });
+      const prev = replayIndexRef.current;
+      if (prev >= effectiveMarket.candles.length - 1) {
+        setIsReplayPlaying(false);
+        setToastMessage("Replay reached the end of history.");
+        return;
+      }
+      const nextIdx = prev + 1;
+      const nextCandle = effectiveMarket.candles[nextIdx];
+      if (nextCandle) {
+        setReplayWallet((w) => {
+          const res = advanceReplayCandle(w, nextCandle);
+          if (res.event) {
+            const msg = `Bracket triggered: ${res.event.reason === "take_profit" ? "Take Profit" : "Stop Loss"} (${res.event.pnl >= 0 ? "+" : ""}$${res.event.pnl.toFixed(2)})`;
+            window.setTimeout(() => setToastMessage(msg), 0);
+          }
+          return res.wallet;
+        });
+      }
+      setReplayIndex(nextIdx);
     }, intervalMs);
 
     return () => window.clearInterval(timer);
@@ -6142,18 +6207,32 @@ export default function TradingDesk() {
                                         </div>
                                         <div className="journal-actions">
                                           <span className="journal-price">{formatMoney(item.price)}</span>
-                                          <button
-                                            type="button"
-                                            className="journal-open"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedJournalItem(item);
-                                            }}
-                                            title="Open full expanded modal"
-                                            aria-label={`Open full modal for ${item.symbol}`}
-                                          >
-                                            Full Modal <Icon name="arrow" size={12} />
-                                          </button>
+                                          <div className="journal-row-btn-group">
+                                            <button
+                                              type="button"
+                                              className="journal-row-backtest-btn"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleBacktestFromJournal(item);
+                                              }}
+                                              title={`Backtest ${item.symbol} in Strategy Lab`}
+                                              aria-label={`Backtest ${item.symbol} in Strategy Lab`}
+                                            >
+                                              <Icon name="backtest" size={11} /> Backtest
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="journal-open"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedJournalItem(item);
+                                              }}
+                                              title="Open full expanded modal"
+                                              aria-label={`Open full modal for ${item.symbol}`}
+                                            >
+                                              Full Modal <Icon name="arrow" size={12} />
+                                            </button>
+                                          </div>
                                           <span className={`journal-selection-hint ${isSelected ? "is-active" : ""}`}>
                                             {isSelected ? "Active in preview" : "Click row to preview"}
                                           </span>
@@ -6195,6 +6274,38 @@ export default function TradingDesk() {
                           <span>Quote at capture</span>
                           <strong>{formatMoney(activeJournalPreview.price)}</strong>
                         </div>
+                      </div>
+
+                      <div className="detail-pane-quick-actions">
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          onClick={() => handleBacktestFromJournal(activeJournalPreview)}
+                          title={`Backtest ${activeJournalPreview.symbol} in Strategy Lab`}
+                        >
+                          <Icon name="backtest" size={14} /> Backtest in Lab
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => {
+                            setSymbol(activeJournalPreview.symbol);
+                            setChartInterval(activeJournalPreview.interval);
+                            setOrderSide("buy");
+                            setOrderOpen(true);
+                          }}
+                          title="Open paper order ticket for this token"
+                        >
+                          <Icon name="paper" size={13} /> Simulate Order
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => setSelectedJournalItem(activeJournalPreview)}
+                          title="Open full expanded modal"
+                        >
+                          Full Modal <Icon name="arrow" size={11} />
+                        </button>
                       </div>
 
                       <div className="detail-pane-question-box">
@@ -6255,72 +6366,6 @@ export default function TradingDesk() {
                           <p>{activeJournalPreview.invalidation}</p>
                         </div>
                       ) : null}
-
-                      <div className="detail-pane-actions">
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          onClick={() => {
-                            const rep: Report = {
-                              id: activeJournalPreview.id,
-                              question: activeJournalPreview.question,
-                              symbol: activeJournalPreview.symbol,
-                              interval: activeJournalPreview.interval,
-                              market: {
-                                symbol: activeJournalPreview.symbol,
-                                category: "SPOT",
-                                interval: activeJournalPreview.interval,
-                                price: activeJournalPreview.price,
-                                change24h: activeJournalPreview.marketSnapshot?.change24h ?? 0,
-                                high24h: activeJournalPreview.marketSnapshot?.high24h ?? activeJournalPreview.price,
-                                low24h: activeJournalPreview.marketSnapshot?.low24h ?? activeJournalPreview.price,
-                                volume24h: activeJournalPreview.marketSnapshot?.volume24h ?? 0,
-                                turnover24h: activeJournalPreview.marketSnapshot?.turnover24h ?? 0,
-                                asOf: activeJournalPreview.createdAt,
-                                candles: [],
-                              },
-                              indicators: activeJournalPreview.indicators ?? {
-                                ema20: null,
-                                ema50: null,
-                                rsi14: 50,
-                                support: activeJournalPreview.price * 0.98,
-                                resistance: activeJournalPreview.price * 1.02,
-                                rangePct: 2,
-                                regime: activeJournalPreview.regime,
-                              },
-                              summary: activeJournalPreview.summary,
-                              bullCase: activeJournalPreview.bullCase ?? "",
-                              bearCase: activeJournalPreview.bearCase ?? "",
-                              invalidation: activeJournalPreview.invalidation ?? "",
-                              engine: "journal-cache",
-                              commentary: null,
-                              createdAt: activeJournalPreview.createdAt,
-                            };
-                            handleBacktestFromReport(rep);
-                          }}
-                        >
-                          <Icon name="backtest" size={14} /> Backtest in Lab
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          onClick={() => {
-                            setSymbol(activeJournalPreview.symbol);
-                            setChartInterval(activeJournalPreview.interval);
-                            setOrderSide("buy");
-                            setOrderOpen(true);
-                          }}
-                        >
-                          <Icon name="wallet" size={14} /> Simulate Order
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          onClick={() => setSelectedJournalItem(activeJournalPreview)}
-                        >
-                          Pop out modal
-                        </button>
-                      </div>
                     </aside>
                   ) : null}
                 </div>
@@ -6676,6 +6721,31 @@ export default function TradingDesk() {
         </div>
       ) : null}
       {selectedJournalItem ? <div className="modal-backdrop journal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedJournalItem(null); }}><section className="order-modal journal-detail-modal" role="dialog" aria-modal="true" aria-labelledby="journal-detail-title" aria-describedby="journal-detail-description"><div className="modal-heading"><div><p className="page-kicker">Saved research · {selectedJournalItem.interval}</p><h2 id="journal-detail-title">{selectedJournalItem.symbol}</h2></div><button ref={journalCloseRef} className="icon-button" onClick={() => setSelectedJournalItem(null)} aria-label="Close journal details"><Icon name="close" /></button></div><p className="journal-detail-question" id="journal-detail-description">{selectedJournalItem.question}</p><div className="journal-detail-stamp"><span>Brief saved {formatDate(selectedJournalItem.createdAt)}</span><span>{selectedJournalItem.engine ? `Model: ${selectedJournalItem.engine}` : "Market source: Bitget public data"}</span></div>
+        <div className="journal-modal-actions">
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={() => {
+              handleBacktestFromJournal(selectedJournalItem);
+              setSelectedJournalItem(null);
+            }}
+          >
+            <Icon name="backtest" size={14} /> Backtest in Lab
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => {
+              setSymbol(selectedJournalItem.symbol);
+              setChartInterval(selectedJournalItem.interval);
+              setOrderSide("buy");
+              setOrderOpen(true);
+              setSelectedJournalItem(null);
+            }}
+          >
+            <Icon name="paper" size={13} /> Simulate Order
+          </button>
+        </div>
         <div className="journal-snapshot-grid">
           <div><span>Captured price</span><strong>{formatMoney(selectedJournalItem.price)}</strong></div>
           <div><span>24h move</span><strong className={selectedJournalItem.marketSnapshot && selectedJournalItem.marketSnapshot.change24h < 0 ? "tone-down" : "tone-up"}>{selectedJournalItem.marketSnapshot ? formatPercent(selectedJournalItem.marketSnapshot.change24h) : "n/a"}</strong></div>

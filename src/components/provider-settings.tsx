@@ -421,9 +421,9 @@ export const ProviderSettings = memo(function ProviderSettings() {
               </p>
             </div>
             <div className="ai-handout-guide-box">
-              <strong>4. Offline Documentation Handout</strong>
+              <strong>4. Offline Documentation Guide</strong>
               <p>
-                A complete technical reference manual is saved in the workspace root at <code>AI_SWITCHING_HANDOUT.md</code> for offline reading, team distribution, or handing off to another AI assistant.
+                A complete technical reference manual is included in the project repository at <code>README.md</code> under the AI Providers &amp; Model Switching Guide section.
               </p>
             </div>
           </div>
