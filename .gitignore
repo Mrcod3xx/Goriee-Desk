@@ -7,3 +7,10 @@ out/
 next-env.d.ts
 
 .vercel/
+
+# Local agent handovers and notes (kept locally on disk, ignored from repo)
+PROJECT_MEMORY.md
+TODO.md
+AI_AGENT_HANDOVER.md
+AI_SWITCHING_HANDOUT.md
+CODEX_HANDOFF_2026-09-25.md
