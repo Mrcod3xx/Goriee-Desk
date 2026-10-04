@@ -34,11 +34,39 @@ test("E2E Browser: Comprehensive UI and Workflow Validation", async (t) => {
 
   try {
     // ---------------------------------------------------------
+    // 0. Demo Notice Modal: First-Load Unskippable Disclaimer
+    // ---------------------------------------------------------
+    await t.test("Notice Modal: Displays on Open & Requires 'I Understand, Continue'", async () => {
+      console.log("Navigating to", BASE_URL);
+      await page.goto(BASE_URL, { waitUntil: "networkidle2", timeout: 25000 });
+
+      // Verify notice modal is visible
+      await page.waitForSelector(".demo-notice-modal", { timeout: 10000 });
+      const modalText = await page.$eval(".demo-notice-modal", (el) => el.textContent);
+      assert.ok(modalText.includes("Welcome to Goriee AI Desk"), "Modal title should welcome user");
+      assert.ok(modalText.includes("Locally Developed Demo App"), "Must state locally developed demo");
+      assert.ok(modalText.includes("Run Locally to Unlock Full Potential"), "Must state running locally unlocks full potential");
+      assert.ok(modalText.includes("Use Your Own AI Provider"), "Must state users should use own AI provider");
+      assert.ok(modalText.includes("Unrestricted Access with Your Own Key"), "Must state removing restrictions with own key");
+
+      // Verify exact button text
+      const btnText = await page.$eval("#demo-notice-continue-btn", (el) => el.textContent?.trim());
+      assert.ok(btnText.includes("I Understand, Continue"), "Button must state 'I Understand, Continue'");
+
+      // Capture screenshot of notice modal
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "00_demo_notice_modal.png") });
+
+      // Click "I Understand, Continue" to proceed
+      await page.click("#demo-notice-continue-btn");
+
+      // Verify modal is dismissed
+      await page.waitForFunction(() => !document.querySelector(".demo-notice-modal"), { timeout: 5000 });
+    });
+
+    // ---------------------------------------------------------
     // 1. Desk View: Load & Header Verification
     // ---------------------------------------------------------
     await t.test("Desk: Load and Header Elements", async () => {
-      console.log("Navigating to", BASE_URL);
-      await page.goto(BASE_URL, { waitUntil: "networkidle0", timeout: 25000 });
       const title = await page.title();
       assert.ok(title.includes("Goriee AI Desk"), `Title expected to contain 'Goriee AI Desk', got: ${title}`);
 

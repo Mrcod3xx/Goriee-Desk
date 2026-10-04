@@ -19,11 +19,31 @@ export type UrlCitation = {
   content: string;
 };
 
-export function getLLMConfiguration(): LLMConfiguration | null {
+export function getLLMConfiguration(headers?: Headers | null): LLMConfiguration | null {
+  const customKey = headers?.get("x-llm-api-key")?.trim();
+  const customBaseUrl = headers?.get("x-llm-base-url")?.trim()?.replace(/\/+$/, "");
+  const customModel = headers?.get("x-llm-model")?.trim();
+
+  if (customKey && customBaseUrl && customModel) {
+    return {
+      apiKey: customKey,
+      baseUrl: customBaseUrl,
+      model: customModel,
+    };
+  }
+
   const apiKey = process.env.LLM_API_KEY?.trim();
   const baseUrl = process.env.LLM_BASE_URL?.trim().replace(/\/$/, "");
   const model = process.env.LLM_MODEL?.trim();
   return apiKey && baseUrl && model ? { apiKey, baseUrl, model } : null;
+}
+
+export function isCustomLLM(headers?: Headers | null): boolean {
+  return Boolean(
+    headers?.get("x-llm-api-key")?.trim() &&
+    headers?.get("x-llm-base-url")?.trim() &&
+    headers?.get("x-llm-model")?.trim()
+  );
 }
 
 export function getLLMProvider(baseUrl: string | null | undefined): LLMProvider | null {
@@ -87,15 +107,15 @@ export async function requestJsonCompletion<T>(
   system: string,
   user: unknown,
   outputSchema?: JsonOutputSchema,
-  options: { webSearch?: boolean; citations?: UrlCitation[] } = {},
+  options: { webSearch?: boolean; citations?: UrlCitation[]; configuration?: LLMConfiguration } = {},
 ): Promise<{
   model: string;
   result: T;
   citations: UrlCitation[];
 }> {
-  const configuration = getLLMConfiguration();
+  const configuration = options.configuration ?? getLLMConfiguration();
   if (!configuration) {
-    throw new Error("AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL to the server's .env.local file, then restart the app.");
+    throw new Error("AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in Settings or .env.local, then try again.");
   }
 
   const provider = getLLMProvider(configuration.baseUrl);

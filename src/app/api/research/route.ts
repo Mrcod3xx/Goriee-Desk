@@ -57,9 +57,10 @@ export async function POST(request: NextRequest) {
   if (!/^[A-Z0-9]{5,20}$/.test(symbol) || !allowedIntervals.has(interval)) {
     return NextResponse.json({ error: "Choose a supported spot symbol and timeframe." }, { status: 400 });
   }
-  if (!getLLMConfiguration()) {
+  const configuration = getLLMConfiguration(request.headers);
+  if (!configuration) {
     return NextResponse.json({
-      error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL to the server's .env.local file, then restart the app.",
+      error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in Settings or .env.local, then try again.",
     }, { status: 503 });
   }
 
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest) {
           additionalProperties: false,
         },
       },
-      { webSearch: includeWebResearch, citations: liveCitations },
+      { webSearch: includeWebResearch, citations: liveCitations, configuration },
     );
 
     const report = {

@@ -30,7 +30,8 @@ import { PortfolioAnalytics } from "@/components/portfolio-analytics";
 import { StrategyCopilot } from "@/components/strategy-copilot";
 import { ReplayScorecardModal } from "@/components/replay-scorecard-modal";
 import type { View, ScannerSort, ScannerAssetType, Report, JournalItem, PaperResearchRef, PaperBacktestRef, PaperTrade, ClosedPaperTrade, PaperLedgerPosition, Quote, OpenPaperPosition, PaperAlert, PaperBracket, StrategyPlaybook, Instrument, BacktestResult, ReplayBracketConfig, ReplayTargetTrade } from "@/components/desk-types";
-import { DEFAULT_WATCHLIST, STARTING_CASH, STARTER_PLAYBOOKS, supportsBacktestWindow, storageKeys, formatPrice, formatScannerPrice, formatMoney, formatPercent, formatCompact, formatDuration, tradeStrategyLabel, formatDate, researchErrorMessage, safeRead } from "@/components/desk-shared";
+import { DEFAULT_WATCHLIST, STARTING_CASH, STARTER_PLAYBOOKS, supportsBacktestWindow, storageKeys, formatPrice, formatScannerPrice, formatMoney, formatPercent, formatCompact, formatDuration, tradeStrategyLabel, formatDate, researchErrorMessage, safeRead, getCustomLlmHeaders, hasCustomLlm } from "@/components/desk-shared";
+import { DemoNoticeModal } from "@/components/demo-notice-modal";
 import { Icon } from "@/components/desk-icon";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { useConnectionStatus, useDocumentVisibility, useOnlineResumeToken } from "@/components/use-live-status";
@@ -206,7 +207,25 @@ export default function TradingDesk() {
   const documentVisible = useDocumentVisibility();
   const pollingEnabled = shouldPoll({ visible: documentVisible });
   const resumeToken = useOnlineResumeToken();
-  const cooldownSeconds = Math.max(0, Math.ceil((aiRetryAt - clockNow) / 1000));
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const acknowledged = window.localStorage.getItem(storageKeys.demoDisclaimer);
+      if (acknowledged !== "true") {
+        setDisclaimerOpen(true);
+      }
+    } catch {
+      setDisclaimerOpen(true);
+    }
+  }, []);
+
+  const handleAcknowledgeDisclaimer = useCallback(() => {
+    safeWrite(storageKeys.demoDisclaimer, "true");
+    setDisclaimerOpen(false);
+  }, []);
+
+  const cooldownSeconds = hasCustomLlm() ? 0 : Math.max(0, Math.ceil((aiRetryAt - clockNow) / 1000));
   const researchAbortRef = useRef<AbortController | null>(null);
   const backtestAbortRef = useRef<AbortController | null>(null);
   const closingAssets = useRef(new Set<string>());
@@ -431,7 +450,7 @@ export default function TradingDesk() {
 
   useEffect(() => {
     let current = true;
-    fetch("/api/ai-status", { cache: "no-store" })
+    fetch("/api/ai-status", { cache: "no-store", headers: getCustomLlmHeaders() })
       .then(async (response) => {
         const payload = await response.json();
         if (current && response.ok) {
@@ -1197,7 +1216,7 @@ export default function TradingDesk() {
       const prompt = question.trim() || `Analyze ${symbol} on the ${chartInterval} timeframe.`;
       const response = await fetch("/api/research", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...getCustomLlmHeaders() },
         signal: controller.signal,
         body: JSON.stringify({ question: prompt, symbol, interval: chartInterval, includeWebResearch }),
       });
@@ -1278,7 +1297,7 @@ export default function TradingDesk() {
     try {
       const response = await fetch("/api/backtest", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...getCustomLlmHeaders() },
         signal: controller.signal,
         body: JSON.stringify({
           symbol: overrides?.symbol ?? playbook?.symbol ?? symbol,
@@ -7025,6 +7044,11 @@ export default function TradingDesk() {
         interval={chartInterval}
         onRestartReplay={handleRestartReplay}
         onClose={handleCloseScorecard}
+      />
+
+      <DemoNoticeModal
+        isOpen={disclaimerOpen}
+        onContinue={handleAcknowledgeDisclaimer}
       />
     </main>
   );

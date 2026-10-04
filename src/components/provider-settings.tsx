@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
+import { getCustomLlmHeaders, hasCustomLlm, storageKeys } from "./desk-shared";
 
 type ProviderId = "nvidia" | "openrouter" | "openai" | "anthropic" | "unorouter" | "custom";
 type ProviderStatus = {
@@ -10,6 +11,7 @@ type ProviderStatus = {
   provider: ProviderId | null;
   keyConfigured: boolean;
   editable: boolean;
+  isCustom?: boolean;
 };
 
 const presets: Record<Exclude<ProviderId, "custom">, { label: string; baseUrl: string; model: string; description: string }> = {
@@ -135,15 +137,36 @@ export const ProviderSettings = memo(function ProviderSettings() {
     setTimeout(() => setCopiedEnv(false), 2000);
   }
 
+  const [isCustomActive, setIsCustomActive] = useState(false);
+
   async function refreshStatus() {
-    const response = await fetch("/api/ai-status", { cache: "no-store" });
+    const headers = getCustomLlmHeaders();
+    const response = await fetch("/api/ai-status", { cache: "no-store", headers });
     if (!response.ok) throw new Error("Could not read the current AI configuration.");
     const next = (await response.json()) as ProviderStatus;
     setStatus(next);
-    if (next.configured && next.provider && next.baseUrl && next.model) {
-      setProvider(next.provider);
-      setBaseUrl(next.baseUrl);
-      setModel(next.model);
+
+    const hasCustom = hasCustomLlm();
+    setIsCustomActive(hasCustom || Boolean(next.isCustom));
+
+    try {
+      const raw = window.localStorage.getItem(storageKeys.customLlm);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.baseUrl) setBaseUrl(parsed.baseUrl);
+        if (parsed?.model) setModel(parsed.model);
+        if (parsed?.provider) setProvider(parsed.provider);
+      } else if (next.configured && next.provider && next.baseUrl && next.model) {
+        setProvider(next.provider);
+        setBaseUrl(next.baseUrl);
+        setModel(next.model);
+      }
+    } catch {
+      if (next.configured && next.provider && next.baseUrl && next.model) {
+        setProvider(next.provider);
+        setBaseUrl(next.baseUrl);
+        setModel(next.model);
+      }
     }
     return next;
   }
@@ -164,36 +187,69 @@ export const ProviderSettings = memo(function ProviderSettings() {
     setMessage("");
   }
 
+  function handleResetCustomProvider() {
+    try {
+      window.localStorage.removeItem(storageKeys.customLlm);
+    } catch {}
+    setIsCustomActive(false);
+    setApiKey("");
+    setMessage("Custom provider cleared. Reverted to demo server provider.");
+    setError("");
+    fetch("/api/ai-status", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: ProviderStatus) => {
+        setStatus(data);
+        if (data.configured && data.provider && data.baseUrl && data.model) {
+          setProvider(data.provider);
+          setBaseUrl(data.baseUrl);
+          setModel(data.model);
+        }
+      })
+      .catch(() => {});
+  }
+
   async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
     setMessage("");
     try {
+      // Save custom provider in browser localStorage so it's active immediately with no demo limitations
+      if (apiKey.trim()) {
+        const customData = { baseUrl, model, apiKey, provider };
+        window.localStorage.setItem(storageKeys.customLlm, JSON.stringify(customData));
+        setIsCustomActive(true);
+      } else {
+        try {
+          const raw = window.localStorage.getItem(storageKeys.customLlm);
+          if (raw) {
+            const existing = JSON.parse(raw);
+            if (existing?.apiKey) {
+              window.localStorage.setItem(storageKeys.customLlm, JSON.stringify({ baseUrl, model, apiKey: existing.apiKey, provider }));
+              setIsCustomActive(true);
+            }
+          }
+        } catch {}
+      }
+
       const response = await fetch("/api/settings", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ baseUrl, model, apiKey }),
       });
-      const payload = await response.json().catch(() => ({})) as ProviderStatus & { error?: string };
+      const payload = await response.json().catch(() => ({})) as ProviderStatus & { error?: string; clientOnly?: boolean };
       if (!response.ok) throw new Error(payload.error ?? "Settings could not be saved.");
       setStatus(payload);
       setProvider(payload.provider ?? provider);
       setBaseUrl(payload.baseUrl ?? baseUrl);
       setModel(payload.model ?? model);
       setApiKey("");
-      setMessage("Saved on this local server. New research and backtests will use these settings.");
+      setMessage(
+        payload.clientOnly
+          ? "Custom provider saved in your browser! Your personal AI provider is active with unrestricted access."
+          : "Saved to local server (.env.local). New research and backtests will use these settings without limitations."
+      );
     } catch (saveError) {
-      try {
-        const latest = await refreshStatus();
-        if (latest.configured && latest.baseUrl === baseUrl && latest.model === model) {
-          setApiKey("");
-          setMessage("Settings were saved. The local server refreshed while writing its configuration.");
-          return;
-        }
-      } catch {
-        // Keep the original save error for the user.
-      }
       setError(saveError instanceof Error ? saveError.message : "Settings could not be saved.");
     } finally {
       setSaving(false);
@@ -208,14 +264,16 @@ export const ProviderSettings = memo(function ProviderSettings() {
     setPingResult(null);
     const start = performance.now();
     try {
-      const res = await fetch("/api/ai-status", { cache: "no-store" });
+      const res = await fetch("/api/ai-status", { cache: "no-store", headers: getCustomLlmHeaders() });
       const latency = Math.round(performance.now() - start);
       if (!res.ok) throw new Error("Status check failed");
-      const data = await res.json() as { configured?: boolean; model?: string };
+      const data = await res.json() as { configured?: boolean; model?: string; isCustom?: boolean };
       setPingResult({
         ok: Boolean(data.configured),
         latencyMs: latency,
-        message: data.configured ? `Active connection verified (${latency}ms)` : "Endpoint responded, but key is not configured.",
+        message: data.configured
+          ? `${data.isCustom ? "Custom provider" : "AI provider"} verified (${latency}ms) · Model: ${data.model ?? "active"}`
+          : "Endpoint responded, but key is not configured.",
       });
     } catch (e) {
       setPingResult({ ok: false, message: e instanceof Error ? e.message : "Connection failed" });
@@ -322,14 +380,28 @@ export const ProviderSettings = memo(function ProviderSettings() {
             </div>
           </div>
 
-          <label className="provider-field" htmlFor="ai-base-url"><span>API base URL</span><input id="ai-base-url" type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://router.example/v1" autoComplete="url" required disabled={!status?.editable || saving} /></label>
-          <label className="provider-field" htmlFor="ai-model"><span>Model ID</span><input id="ai-model" value={model} onChange={(event) => setModel(event.target.value)} placeholder="provider/model-name" maxLength={160} required disabled={!status?.editable || saving} /></label>
-          <label className="provider-field" htmlFor="ai-api-key"><span>API key</span><input id="ai-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status?.keyConfigured && baseUrl === status.baseUrl ? "Blank keeps the saved key" : "Paste the API key for this provider"} autoComplete="new-password" autoCapitalize="none" spellCheck={false} disabled={!status?.editable || saving} /></label>
-          <p className="provider-key-note">Keys are written to this app’s local <code>.env.local</code> file, sent only to the local server, and never returned to the browser. When changing providers, enter that provider’s key.</p>
-          {!status?.editable && !loading ? <p className="provider-readonly-note">Editing is enabled only while the app runs on its local development server. On a deployed server, configure the three LLM environment variables in the host’s settings.</p> : null}
+          <label className="provider-field" htmlFor="ai-base-url"><span>API base URL</span><input id="ai-base-url" type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://router.example/v1" autoComplete="url" required disabled={saving} /></label>
+          <label className="provider-field" htmlFor="ai-model"><span>Model ID</span><input id="ai-model" value={model} onChange={(event) => setModel(event.target.value)} placeholder="provider/model-name" maxLength={160} required disabled={saving} /></label>
+          <label className="provider-field" htmlFor="ai-api-key"><span>API key</span><input id="ai-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status?.keyConfigured && baseUrl === status.baseUrl ? "Blank keeps the saved key" : "Paste the API key for this provider"} autoComplete="new-password" autoCapitalize="none" spellCheck={false} disabled={saving} /></label>
+          <p className="provider-key-note">Configure your personal API key to unlock unrestricted analysis and bypass shared demo rate limits. On local development servers, settings are written to <code>.env.local</code>. On the hosted demo, your key is securely stored only in your browser.</p>
+          {isCustomActive ? (
+            <div className="provider-custom-banner">
+              <div className="provider-custom-banner-text">
+                <strong>Custom Provider Active (Unrestricted)</strong>
+                <span>Requests bypass shared demo pacing and route directly through your provider.</span>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary custom-reset-btn"
+                onClick={handleResetCustomProvider}
+              >
+                Reset to Demo Provider
+              </button>
+            </div>
+          ) : null}
           {error ? <p className="inline-error" role="alert">{error}</p> : null}
           {message ? <p className="provider-success" role="status">{message}</p> : null}
-          <div className="provider-form-footer"><span>{status?.keyConfigured ? savedEndpointIsSelected ? "Blank keeps the key saved for this endpoint." : `The saved key belongs to ${currentProviderName}; enter a key for this endpoint.` : "No API key is saved yet."}</span><button className="button button-primary" type="submit" disabled={!status?.editable || loading || saving}>{saving ? "Saving settings…" : "Save provider settings"}</button></div>
+          <div className="provider-form-footer"><span>{status?.keyConfigured ? savedEndpointIsSelected ? "Blank keeps the key saved for this endpoint." : `The saved key belongs to ${currentProviderName}; enter a key for this endpoint.` : "No API key is saved yet."}</span><button className="button button-primary" type="submit" disabled={loading || saving}>{saving ? "Saving settings…" : "Save provider settings"}</button></div>
         </form>
 
         <div className="provider-guidance">

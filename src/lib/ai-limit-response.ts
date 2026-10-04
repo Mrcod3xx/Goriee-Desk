@@ -8,6 +8,7 @@ import {
   retryAfterSeconds,
   type AiLimitDenial,
 } from "@/lib/ai-rate-limit";
+import { isCustomLLM } from "@/lib/llm";
 
 /**
  * Route-facing wrapper around the framework-agnostic limiter in
@@ -39,6 +40,12 @@ function deny(decision: AiLimitDenial): NextResponse {
  * is consumed by callers that fail validation, so guard *after* input checks.
  */
 export function guardAiRequest(headers: Headers, cost = 1): AiGuard {
+  // If the user connects their own AI provider, bypass shared server pacing!
+  // "Remove the existing AI limitations where possible, as the demo app still has restrictions due to limited funding. Ensure that users can use their own AI provider without unnecessary limitations."
+  if (isCustomLLM(headers)) {
+    return { allowed: true, release: () => {}, remaining: 999 };
+  }
+
   const key = clientKeyFromHeaders(headers);
   const limit = checkAiRateLimit(key, cost);
   if (!limit.allowed) return { allowed: false, response: deny(limit) };

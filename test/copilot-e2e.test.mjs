@@ -39,7 +39,14 @@ test("Copilot E2E: Interactive Verification of Strategy Copilot Drawer", async (
   try {
     await t.test("Copilot: Button Triggers & Drawer Open/Close via Click and Hotkey", async () => {
       console.log("Navigating to", BASE_URL);
-      await page.goto(BASE_URL, { waitUntil: "networkidle0", timeout: 25000 });
+      await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 25000 });
+
+      // Acknowledge notice modal if present
+      const continueBtn = await page.waitForSelector("#demo-notice-continue-btn", { timeout: 8000 }).catch(() => null);
+      if (continueBtn) {
+        await continueBtn.click();
+        await page.waitForFunction(() => !document.querySelector(".demo-notice-modal"), { timeout: 5000 });
+      }
 
       // Verify header button and floating button exist
       await page.waitForSelector(".desk-copilot-header-btn", { timeout: 10000 });
@@ -162,10 +169,11 @@ test("Copilot E2E: Interactive Verification of Strategy Copilot Drawer", async (
 
       await page.evaluate((data) => {
         window.localStorage.setItem("goriee_copilot_sessions_v1", JSON.stringify(data));
+        window.localStorage.setItem("goriee.demo-disclaimer-acknowledged.v1", "true");
       }, seedSession);
 
       // Reload page to pick up seeded localStorage
-      await page.goto(BASE_URL, { waitUntil: "networkidle0", timeout: 25000 });
+      await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 25000 });
 
       // Open Copilot drawer
       await page.click(".desk-copilot-header-btn");
