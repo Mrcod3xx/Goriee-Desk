@@ -11,7 +11,6 @@ import {
 } from "@/types/copilot";
 import { parseCopilotResponse } from "@/lib/copilot-prompt";
 import { CopilotActionCard } from "@/components/copilot-action-card";
-import { getCustomLlmHeaders, hasCustomLlm } from "./desk-shared";
 
 interface StrategyCopilotProps {
   isOpen: boolean;
@@ -149,9 +148,6 @@ export function StrategyCopilot({
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamTimerRef = useRef<number | null>(null);
 
-  const isCustom = hasCustomLlm();
-  const effectiveCooldown = isCustom ? 0 : (cooldownSeconds ?? 0);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -256,7 +252,7 @@ export function StrategyCopilot({
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputValue).trim();
-    if (!query || isStreaming || effectiveCooldown > 0) return;
+    if (!query || isStreaming || (cooldownSeconds ?? 0) > 0) return;
 
     setInputValue("");
 
@@ -320,7 +316,7 @@ export function StrategyCopilot({
     try {
       const response = await fetch("/api/copilot/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...getCustomLlmHeaders() },
+        headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
           messages: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -748,11 +744,11 @@ export function StrategyCopilot({
             <button
               type="button"
               className="copilot-send-button button button-primary"
-              disabled={!inputValue.trim() || aiConfigured === false || effectiveCooldown > 0}
+              disabled={!inputValue.trim() || aiConfigured === false || (cooldownSeconds ?? 0) > 0}
               onClick={() => void handleSendMessage()}
-              title={effectiveCooldown > 0 ? `Provider cooldown active (${effectiveCooldown}s)` : "Send message to Copilot"}
+              title={(cooldownSeconds ?? 0) > 0 ? `Provider cooldown active (${cooldownSeconds}s)` : "Send message to Copilot"}
             >
-              <span>{effectiveCooldown > 0 ? `${effectiveCooldown}s` : "Send ↵"}</span>
+              <span>{(cooldownSeconds ?? 0) > 0 ? `${cooldownSeconds}s` : "Send ↵"}</span>
             </button>
           )}
         </div>

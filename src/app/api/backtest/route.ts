@@ -46,10 +46,9 @@ export async function POST(request: NextRequest) {
   if (!Number.isFinite(feeBps) || feeBps < 0 || feeBps > 1000 || !Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 1000) {
     return NextResponse.json({ error: "Trading cost assumptions must be between 0 and 1,000 basis points." }, { status: 400 });
   }
-  const configuration = getLLMConfiguration(request.headers);
-  if (!configuration) {
+  if (!getLLMConfiguration()) {
     return NextResponse.json({
-      error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL in Settings or .env.local, then try again.",
+      error: "AI is not configured. Add LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL to the server's .env.local file, then restart the app.",
     }, { status: 503 });
   }
 
@@ -160,7 +159,6 @@ function compileDeterministicFallback(prompt: string): { model: string; result: 
             additionalProperties: false,
           },
         },
-        { configuration },
       );
 
       if (!fallback) return llmCall;

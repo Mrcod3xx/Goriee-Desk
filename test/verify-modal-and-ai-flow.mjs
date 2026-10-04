@@ -81,74 +81,11 @@ async function run() {
     await page.waitForFunction(() => !document.querySelector(".demo-notice-modal"), { timeout: 5000 });
     console.log("Modal successfully dismissed!");
 
-    // Step 5: Verify main desk is now interactive
+    // Step 5: Verify main desk is now interactive after acknowledging
     await page.waitForSelector(".brand-name", { timeout: 5000 });
     console.log("Main desk is active.");
 
-    // Step 6: Verify Settings view allows entering custom AI provider without restrictions
-    console.log("6. Testing AI Provider Settings...");
-    // Find and click the Settings item in the primary nav
-    await page.evaluate(() => {
-      const navButtons = Array.from(document.querySelectorAll(".primary-nav button"));
-      const settingsBtn = navButtons.find((btn) => btn.textContent && btn.textContent.includes("Settings"));
-      if (settingsBtn) {
-        settingsBtn.click();
-      } else {
-        throw new Error("Settings button not found in primary-nav");
-      }
-    });
-
-    await page.waitForSelector(".provider-form", { timeout: 5000 });
-    
-    // Check fields are editable
-    const isModelDisabled = await page.$eval("#ai-model", (el) => el.disabled);
-    assert.strictEqual(isModelDisabled, false, "Model input must not be disabled");
-
-    const isApiKeyDisabled = await page.$eval("#ai-api-key", (el) => el.disabled);
-    assert.strictEqual(isApiKeyDisabled, false, "API Key input must not be disabled");
-
-    const isBaseUrlDisabled = await page.$eval("#ai-base-url", (el) => el.disabled);
-    assert.strictEqual(isBaseUrlDisabled, false, "Base URL input must not be disabled");
-
-    // Fill in custom provider details to test client-side persistence and lack of limitation
-    await page.focus("#ai-base-url");
-    await page.keyboard.down("Control");
-    await page.keyboard.press("KeyA");
-    await page.keyboard.up("Control");
-    await page.keyboard.press("Backspace");
-    await page.type("#ai-base-url", "https://api.openai.com/v1");
-
-    await page.focus("#ai-model");
-    await page.keyboard.down("Control");
-    await page.keyboard.press("KeyA");
-    await page.keyboard.up("Control");
-    await page.keyboard.press("Backspace");
-    await page.type("#ai-model", "gpt-4o-mini");
-
-    await page.focus("#ai-api-key");
-    await page.type("#ai-api-key", "sk-custom-test-key-12345");
-
-    // Click Save settings
-    await page.click(".provider-form button[type='submit']");
-    await new Promise((r) => setTimeout(r, 1000));
-
-    // Verify localStorage has custom credentials stored
-    const storedCustomLlm = await page.evaluate(() => window.localStorage.getItem("goriee.custom-llm.v1"));
-    assert.ok(storedCustomLlm, "Custom LLM config must be stored in localStorage");
-    const parsedCustom = JSON.parse(storedCustomLlm);
-    assert.equal(parsedCustom.baseUrl, "https://api.openai.com/v1");
-    assert.equal(parsedCustom.model, "gpt-4o-mini");
-
-    // Verify custom provider active banner is rendered
-    await page.waitForSelector(".provider-custom-banner", { timeout: 5000 });
-    const bannerText = await page.$eval(".provider-custom-banner", (el) => el.textContent);
-    assert.ok(bannerText.includes("Custom Provider Active"), "Banner must announce active custom provider");
-
-    const settingsScreenshotPath = path.join(SCREENSHOT_DIR, "provider_settings_unrestricted.png");
-    await page.screenshot({ path: settingsScreenshotPath });
-    console.log("Saved settings screenshot:", settingsScreenshotPath);
-
-    console.log("ALL MODAL & AI FLOW CHECKS PASSED!");
+    console.log("ALL MODAL VERIFICATION CHECKS PASSED!");
   } finally {
     await browser.close();
   }

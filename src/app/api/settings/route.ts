@@ -42,6 +42,10 @@ function normalizeBaseUrl(value: unknown) {
 }
 
 export async function POST(request: Request) {
+  if (process.env.NODE_ENV !== "development" || !isLocalSameOrigin(request)) {
+    return NextResponse.json({ error: "Provider settings can only be changed from this app's local development server." }, { status: 403 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -65,43 +69,38 @@ export async function POST(request: Request) {
   const apiKey = submittedKey || (baseUrl === currentBaseUrl ? currentKey : "");
   if (!apiKey) return NextResponse.json({ error: "Enter an API key for this provider. Leave it blank only when keeping the current provider key." }, { status: 400 });
 
-  const isLocalDev = process.env.NODE_ENV === "development" && isLocalSameOrigin(request);
-
-  if (isLocalDev) {
-    const persisted = {
-      LLM_BASE_URL: baseUrl,
-      LLM_MODEL: model,
-      LLM_API_KEY: apiKey,
-    };
-    const filePath = path.join(process.cwd(), ".env.local");
-    let existing = "";
-    try {
-      existing = await readFile(filePath, "utf8");
-    } catch {
-      // A new local setup may not have an env file yet.
-    }
-
-    const nextLines: string[] = [];
-    const written = new Set<string>();
-    for (const line of existing.split(/\r?\n/)) {
-      const match = line.match(/^\s*(LLM_BASE_URL|LLM_MODEL|LLM_API_KEY)\s*=/);
-      if (!match) {
-        nextLines.push(line);
-        continue;
-      }
-      const name = match[1] as keyof typeof persisted;
-      if (written.has(name)) continue;
-      nextLines.push(`${name}=${JSON.stringify(persisted[name])}`);
-      written.add(name);
-    }
-    for (const name of settingNames) {
-      if (!written.has(name)) nextLines.push(`${name}=${JSON.stringify(persisted[name])}`);
-    }
-
-    await writeFile(filePath, `${nextLines.join("\n").replace(/\n+$/, "")}\n`, { encoding: "utf8", mode: 0o600 });
-    for (const name of settingNames) process.env[name] = persisted[name];
+  const persisted = {
+    LLM_BASE_URL: baseUrl,
+    LLM_MODEL: model,
+    LLM_API_KEY: apiKey,
+  };
+  const filePath = path.join(process.cwd(), ".env.local");
+  let existing = "";
+  try {
+    existing = await readFile(filePath, "utf8");
+  } catch {
+    // A new local setup may not have an env file yet.
   }
 
+  const nextLines: string[] = [];
+  const written = new Set<string>();
+  for (const line of existing.split(/\r?\n/)) {
+    const match = line.match(/^\s*(LLM_BASE_URL|LLM_MODEL|LLM_API_KEY)\s*=/);
+    if (!match) {
+      nextLines.push(line);
+      continue;
+    }
+    const name = match[1] as keyof typeof persisted;
+    if (written.has(name)) continue;
+    nextLines.push(`${name}=${JSON.stringify(persisted[name])}`);
+    written.add(name);
+  }
+  for (const name of settingNames) {
+    if (!written.has(name)) nextLines.push(`${name}=${JSON.stringify(persisted[name])}`);
+  }
+
+  await writeFile(filePath, `${nextLines.join("\n").replace(/\n+$/, "")}\n`, { encoding: "utf8", mode: 0o600 });
+  for (const name of settingNames) process.env[name] = persisted[name];
   return NextResponse.json({
     configured: true,
     model,
@@ -109,6 +108,5 @@ export async function POST(request: Request) {
     provider: getLLMProvider(baseUrl),
     keyConfigured: true,
     editable: true,
-    clientOnly: !isLocalDev,
   });
 }

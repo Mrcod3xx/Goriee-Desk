@@ -59,7 +59,6 @@ export const storageKeys = {
   ruleRunnerLogs: "goriee.rule-runner-logs.v1",
   aiCooldown: "goriee.ai-cooldown.v1",
   demoDisclaimer: "goriee.demo-disclaimer-acknowledged.v1",
-  customLlm: "goriee.custom-llm.v1",
   /** In-progress research/strategy input text, re-saved on every keystroke. */
   drafts: "goriee.drafts.v1",
   /**
@@ -69,37 +68,6 @@ export const storageKeys = {
    */
   copilotSessions: "goriee_copilot_sessions_v1",
 };
-
-export function getCustomLlmHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(storageKeys.customLlm);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.apiKey && parsed.baseUrl && parsed.model) {
-      return {
-        "x-llm-base-url": String(parsed.baseUrl).trim(),
-        "x-llm-model": String(parsed.model).trim(),
-        "x-llm-api-key": String(parsed.apiKey).trim(),
-      };
-    }
-  } catch {
-    // ignore json or localstorage read errors
-  }
-  return {};
-}
-
-export function hasCustomLlm(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const raw = window.localStorage.getItem(storageKeys.customLlm);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    return Boolean(parsed?.apiKey && parsed?.baseUrl && parsed?.model);
-  } catch {
-    return false;
-  }
-}
 
 export function formatPrice(value: number) {
   if (!Number.isFinite(value)) return "n/a";
