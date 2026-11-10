@@ -16,8 +16,8 @@ const presets: Record<Exclude<ProviderId, "custom">, { label: string; baseUrl: s
   nvidia: {
     label: "NVIDIA NIM · Build API",
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    model: "z-ai/glm-5.3",
-    description: "753B MoE text model (Z-ai GLM-5.3) hosted on NVIDIA NIM with DeepSeek-style sparse attention, reasoning, and tool calling.",
+    model: "z-ai/glm-5.3-flash",
+    description: "High-speed MoE model (Z-ai GLM-5.3 Flash) hosted on NVIDIA NIM with DeepSeek-style sparse attention, reasoning, and tool calling.",
   },
   openrouter: {
     label: "OpenRouter",

@@ -128,7 +128,7 @@ The Next.js dev server hot-reloads these environment variables automatically.
 | **DeepSeek (Direct)** | `https://api.deepseek.com/v1` | `deepseek-chat` (V3)<br>`deepseek-reasoner` (R1) | Complex reasoning & low token cost | ~$0.14 - $0.55 per 1M tokens |
 | **OpenAI** | `https://api.openai.com/v1` | `gpt-4o-mini` (Fastest)<br>`gpt-4o` (Flagship) | Reliable structured JSON outputs, ultra-fast response | Developer API billing |
 | **Anthropic Claude** | `https://api.anthropic.com/v1` | `claude-3-5-haiku-20241022`<br>`claude-3-5-sonnet-20241022` | Deep quantitative reasoning & complex conditional rules | Commercial API token billing |
-| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`<br>`z-ai/glm-5.3` | High-throughput enterprise MoE inference | 1,000 free credits upon sign-up |
+| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct`<br>`z-ai/glm-5.3-flash` | High-throughput enterprise MoE inference | 1,000 free credits upon sign-up |
 | **Local Ollama** *(Private)* | `http://localhost:11434/v1` | `deepseek-r1:14b`<br>`qwen2.5-coder:14b`<br>`llama3.1:8b` | Complete offline privacy, zero API costs | 100% Free (runs locally on GPU/CPU) |
 | **LM Studio / vLLM** | `http://localhost:1234/v1` | Local loaded model name | Local testing with GUI controls | Free local server |
 
